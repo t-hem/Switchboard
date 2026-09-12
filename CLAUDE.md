@@ -46,6 +46,31 @@ sync payload.
 An agent that is configured but not installed is a normal state. Report it as
 unavailable, surface its display-only `install` string, and never execute that string.
 
+### Killing a PTY: always name the signal
+
+`node-pty`'s `IPty.kill()` defaults to **SIGHUP**, not SIGTERM. A process that
+deliberately survives a closing terminal will ignore it, and the daemon will then
+report a session dead while the process keeps running. Always pass the signal
+explicitly: SIGTERM, then SIGKILL after the grace period.
+
+Shutdown must *await* termination. Exiting as soon as the signals are sent skips the
+escalation and strands exactly the processes the shutdown was meant to clean up —
+with their ledger entries already removed, so nothing even records them.
+
+### The orphan ledger never kills anything on its own
+
+`sessions.json` exists so a crashed daemon does not leave agent processes that are
+tedious to hunt down. Two rules:
+
+1. **Verify before signalling.** PIDs are recycled. Every entry records the process
+   creation time at spawn, and it must match exactly before anything is killed. An
+   entry that cannot be verified is dropped, never killed.
+2. **Surface, do not act.** Survivors are reported to the operator, who decides.
+   Nothing is killed automatically at startup.
+
+Ledger entries are removed when a process *actually exits*, not when a kill is
+requested — so something that refuses to die stays on record as an orphan.
+
 ## Conventions
 
 - TypeScript strict. No `any` outside narrow, commented interop points.

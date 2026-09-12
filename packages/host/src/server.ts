@@ -1,34 +1,235 @@
 import cors from "@fastify/cors";
-import Fastify, { type FastifyInstance } from "fastify";
+import websocket from "@fastify/websocket";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
+import { bearerToken, tokenMatches } from "./auth.js";
+import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
-import type { HealthResponse, HostConfig } from "./types.js";
+import { SessionError, type SessionManager } from "./sessions.js";
+import type { HealthResponse, HostConfig, Session } from "./types.js";
+import { scanWorkspaces } from "./workspaces.js";
+
+/**
+ * Above this many bytes queued on a socket, output is dropped rather than buffered.
+ * A phone on a bad link must not be able to grow the daemon's heap without bound;
+ * the terminal redraws on the next full repaint anyway.
+ */
+const MAX_SOCKET_BACKLOG_BYTES = 8 * 1024 * 1024;
 
 export type ServerDeps = {
   hostConfig: HostConfig;
   registry: AgentRegistry;
+  sessions: SessionManager;
+  ledger: SessionLedger;
   version: string;
-  sessionCount: () => number;
 };
+
+type IdParams = { id: string };
+type StreamQuery = { token?: string };
+
+type CreateSessionBody = {
+  agent?: unknown;
+  cwd?: unknown;
+  cols?: unknown;
+  rows?: unknown;
+  extraArgs?: unknown;
+  label?: unknown;
+};
+
+type KillOrphansBody = { ids?: unknown; force?: unknown };
+
+function asString(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+function asNumber(v: unknown): number | undefined {
+  return typeof v === "number" ? v : undefined;
+}
+
+function asStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : undefined;
+}
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
-  // The token is the gate; the tailnet is the network boundary. See spec §4.5.
+  // The token is the gate and the tailnet is the network boundary, so the browser
+  // origin is not a meaningful restriction here. See spec §4.5.
   await app.register(cors, {
     origin: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type"],
   });
+  await app.register(websocket);
 
-  app.get("/health", async (): Promise<HealthResponse> => {
-    return {
-      hostLabel: deps.hostConfig.hostLabel,
-      platform: process.platform,
-      version: deps.version,
-      agents: deps.registry.list(),
-      sessionCount: deps.sessionCount(),
-    };
+  // Clients routinely send `Content-Type: application/json` on bodyless requests
+  // (DELETE, in particular). Fastify's default parser rejects that as an empty JSON
+  // body; treat it as "no body" instead of returning a baffling 400.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const text = typeof body === "string" ? body.trim() : "";
+    if (text === "") {
+      done(null, undefined);
+      return;
+    }
+    try {
+      done(null, JSON.parse(text) as unknown);
+    } catch {
+      done(new SessionError("invalid JSON body", 400), undefined);
+    }
+  });
+
+  app.setErrorHandler((err: unknown, _req, reply) => {
+    if (err instanceof SessionError) {
+      void reply.code(err.status).send({ error: err.message });
+      return;
+    }
+    const message = err instanceof Error ? err.message : "internal error";
+    // Fastify surfaces malformed JSON bodies and bad params through here too.
+    const status =
+      typeof err === "object" && err !== null && typeof (err as { statusCode?: unknown }).statusCode === "number"
+        ? (err as { statusCode: number }).statusCode
+        : 500;
+    if (status >= 500) console.error("[http]", err);
+    void reply.code(status).send({ error: message });
+  });
+
+  // --- unauthenticated ------------------------------------------------------
+  // /health is deliberately open: it is how the client tells "host offline" apart
+  // from "host reachable, token wrong".
+  app.get("/health", async (): Promise<HealthResponse> => ({
+    hostLabel: deps.hostConfig.hostLabel,
+    platform: process.platform,
+    version: deps.version,
+    agents: deps.registry.list(),
+    sessionCount: deps.sessions.count,
+  }));
+
+  // --- websocket stream -----------------------------------------------------
+  // Registered outside the authenticated scope because browsers cannot set headers
+  // on a WebSocket; the token arrives as a query parameter instead.
+  app.get<{ Params: IdParams; Querystring: StreamQuery }>(
+    "/sessions/:id/stream",
+    {
+      websocket: true,
+      onRequest: async (req: FastifyRequest<{ Querystring: StreamQuery }>, reply: FastifyReply) => {
+        if (!tokenMatches(deps.hostConfig.token, req.query.token)) {
+          return reply.code(401).send({ error: "unauthorized" });
+        }
+      },
+    },
+    (socket, req) => {
+      const { id } = req.params;
+
+      let detach: (() => void) | null = null;
+      try {
+        detach = deps.sessions.attach(id, {
+          onData: (chunk) => {
+            if (socket.readyState !== socket.OPEN) return;
+            if (socket.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) return;
+            socket.send(chunk);
+          },
+          onExit: (exitCode) => {
+            if (socket.readyState !== socket.OPEN) return;
+            socket.send(JSON.stringify({ type: "exit", exitCode }));
+          },
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "attach failed";
+        socket.send(JSON.stringify({ type: "error", message }));
+        socket.close(4404, message);
+        return;
+      }
+
+      socket.on("message", (raw: Buffer, isBinary: boolean) => {
+        // Client -> server is JSON text frames only; binary from the client is not
+        // part of the protocol and is ignored rather than written to the pty.
+        if (isBinary) return;
+        let msg: unknown;
+        try {
+          msg = JSON.parse(raw.toString("utf8"));
+        } catch {
+          return;
+        }
+        if (typeof msg !== "object" || msg === null) return;
+        const m = msg as Record<string, unknown>;
+        try {
+          if (m["type"] === "input" && typeof m["data"] === "string") {
+            deps.sessions.write(id, m["data"]);
+          } else if (m["type"] === "resize") {
+            const cols = asNumber(m["cols"]);
+            const rows = asNumber(m["rows"]);
+            if (cols !== undefined && rows !== undefined) deps.sessions.resize(id, cols, rows);
+          }
+        } catch (err: unknown) {
+          // The session may have been killed between frames.
+          if (!(err instanceof SessionError)) console.error(`[ws ${id}]`, err);
+        }
+      });
+
+      const cleanup = (): void => {
+        detach?.();
+        detach = null;
+      };
+      socket.on("close", cleanup);
+      socket.on("error", cleanup);
+    },
+  );
+
+  // --- authenticated --------------------------------------------------------
+  await app.register(async (api) => {
+    api.addHook("onRequest", async (req, reply) => {
+      if (!tokenMatches(deps.hostConfig.token, bearerToken(req.headers.authorization))) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+    });
+
+    api.get("/sessions", async (): Promise<Session[]> => deps.sessions.list());
+
+    api.post<{ Body: CreateSessionBody }>("/sessions", async (req, reply): Promise<Session> => {
+      const body = req.body ?? {};
+      const agent = asString(body.agent);
+      const cwd = asString(body.cwd);
+      if (!agent) throw new SessionError("agent is required", 400);
+      if (!cwd) throw new SessionError("cwd is required", 400);
+
+      const session = deps.sessions.create({
+        agent,
+        cwd,
+        cols: asNumber(body.cols),
+        rows: asNumber(body.rows),
+        extraArgs: asStringArray(body.extraArgs),
+        label: asString(body.label),
+      });
+      void reply.code(201);
+      return session;
+    });
+
+    api.get<{ Params: IdParams }>("/sessions/:id", async (req): Promise<Session> => {
+      const session = deps.sessions.get(req.params.id);
+      if (!session) throw new SessionError(`unknown session: ${req.params.id}`, 404);
+      return session;
+    });
+
+    api.delete<{ Params: IdParams }>("/sessions/:id", async (req, reply) => {
+      // Throws synchronously for an unknown id (404). Otherwise answer straight away
+      // and let SIGTERM -> SIGKILL play out in the background.
+      const terminated = deps.sessions.kill(req.params.id);
+      terminated.catch((err: unknown) => console.error(`[session ${req.params.id}]`, err));
+      return reply.code(204).send();
+    });
+
+    api.get("/workspaces", async (): Promise<string[]> =>
+      scanWorkspaces(deps.hostConfig.workspaceRoots),
+    );
+
+    // Process bookkeeping (not session history): pids this daemon spawned that
+    // outlived a previous, unclean shutdown.
+    api.get("/orphans", async () => deps.ledger.orphans);
+
+    api.post<{ Body: KillOrphansBody }>("/orphans/kill", async (req) => {
+      const body = req.body ?? {};
+      return deps.ledger.killOrphans(asStringArray(body.ids), body.force === true);
+    });
   });
 
   return app;
