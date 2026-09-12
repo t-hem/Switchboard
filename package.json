@@ -1,0 +1,20 @@
+{
+  "name": "switchboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal control plane for terminal coding agents across several machines",
+  "workspaces": [
+    "packages/host",
+    "packages/web"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:host": "npm run dev -w @switchboard/host",
+    "dev:web": "npm run dev -w @switchboard/web",
+    "build": "npm run build -w @switchboard/host && npm run build -w @switchboard/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @switchboard/host"
+  }
+}
