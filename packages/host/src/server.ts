@@ -2,11 +2,12 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
+import { parseAgentsPayload } from "./agentsvalidate.js";
 import { bearerToken, tokenMatches } from "./auth.js";
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
 import { SessionError, type SessionManager } from "./sessions.js";
-import type { HealthResponse, HostConfig, Session } from "./types.js";
+import type { AgentsConfigResponse, HealthResponse, HostConfig, Session } from "./types.js";
 import { scanWorkspaces } from "./workspaces.js";
 
 /**
@@ -37,6 +38,7 @@ type CreateSessionBody = {
 };
 
 type KillOrphansBody = { ids?: unknown; force?: unknown };
+type ForceQuery = { force?: string };
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
@@ -221,6 +223,35 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     api.get("/workspaces", async (): Promise<string[]> =>
       scanWorkspaces(deps.hostConfig.workspaceRoots),
     );
+
+    const agentsResponse = (): AgentsConfigResponse => ({
+      ...deps.registry.config,
+      availability: deps.registry.availability,
+    });
+
+    api.get("/config/agents", async (): Promise<AgentsConfigResponse> => agentsResponse());
+
+    api.put<{ Body: unknown; Querystring: ForceQuery }>("/config/agents", async (req, reply) => {
+      const parsed = parseAgentsPayload(req.body);
+      if (!parsed.ok) throw new SessionError(parsed.error, 400);
+
+      const stored = deps.registry.config.updatedAt;
+      if (parsed.value.updatedAt < stored && req.query.force !== "1") {
+        return reply.code(409).send({
+          error: "stored config is newer",
+          storedUpdatedAt: stored,
+          submittedUpdatedAt: parsed.value.updatedAt,
+        });
+      }
+
+      // Written verbatim, including updatedAt: a synced map must be byte-identical
+      // across the fleet, so the daemon must not restamp it. The client stamps a
+      // fresh updatedAt when a human edits the map (spec §5.5); a payload arriving
+      // without one is treated as such an edit and stamped here.
+      deps.registry.replace(parsed.value);
+      console.log(`[config] agents.json updated (${Object.keys(parsed.value.agents).length} agents), reloaded in place`);
+      return agentsResponse();
+    });
 
     // Process bookkeeping (not session history): pids this daemon spawned that
     // outlived a previous, unclean shutdown.

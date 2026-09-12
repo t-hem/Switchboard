@@ -21,7 +21,7 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 | 1 | Host daemon: PTY sessions, scrollback, REST, WS | done |
 | 2 | Client against a single host | done |
 | 3 | Multi-host fan-out | done |
-| 3.5 | Agent config sync | not started |
+| 3.5 | Agent config sync | done |
 | 4 | Client lock / takeover | not started |
 | 5 | Mobile polish, PWA, `tailscale serve` | not started |
 
@@ -71,6 +71,8 @@ without it. CORS is permissive — the token is the gate, the tailnet is the bou
 | `GET` | `/sessions/:id` | One session, or 404. |
 | `DELETE` | `/sessions/:id` | SIGTERM, then SIGKILL after 3s. Answers 204 immediately; escalation continues in the background. |
 | `GET` | `/workspaces` | Directories one level under `workspaceRoots` that contain a `.git`, cached 60s. |
+| `GET` | `/config/agents` | The agents map plus a per-host `availability` block. |
+| `PUT` | `/config/agents` | `{ agents, updatedAt }` → validated, written verbatim, re-probed, reloaded in place. 409 if the submitted `updatedAt` is older than the stored one, unless `?force=1`. |
 | `GET` | `/orphans` | Processes that outlived a previous daemon run (see below). |
 | `POST` | `/orphans/kill` | `{ ids?, force? }` → kills orphans after re-verifying each one's identity. |
 
@@ -88,6 +90,28 @@ On connect the scrollback buffer is replayed as one binary frame before live
 streaming begins, so reattaching from another device reconstructs the full screen.
 There is no framing protocol on top of the PTY bytes: binary means terminal data,
 text means control.
+
+## Agent config sync
+
+`agents.json` is fleet-wide state stored redundantly on every host, and the **client**
+reconciles it — the daemon never talks to another daemon. On load and whenever
+settings is opened, the client reads `/config/agents` everywhere and compares
+`updatedAt`. A mismatch raises a banner naming the host holding the newest map, and
+*Review* shows a per-host diff of added, removed and changed agents before anything
+is applied. Last-write-wins on the whole map, decided purely by `updatedAt`.
+
+The diff is shown rather than synced silently because a silent last-write-wins can
+quietly discard an agent added on another machine.
+
+`updatedAt` is written **verbatim**, never restamped by the receiving daemon — a
+synced map has to be identical everywhere, and restamping would make every host
+permanently disagree. The client stamps a fresh value when a human edits the map.
+
+Availability is probed per machine and never synced, which is what makes this useful:
+add an agent once, sync, and the machines missing the binary show it greyed out with
+its `install` string as a copyable command. The gap between "configured" and
+"installed" cannot be closed remotely, so it is made visible and one paste wide
+instead. Installing the CLI flips it to available without a daemon restart.
 
 ## Orphaned sessions
 

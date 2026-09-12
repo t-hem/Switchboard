@@ -1,23 +1,28 @@
 import { useState } from "react";
 
 import { clientLabel, setClientLabel } from "../state/hosts.ts";
-import type { HostEntry, HostState } from "../types.ts";
+import type { AgentsConfigResponse, HostEntry, HostState } from "../types.ts";
+import { AgentsEditor } from "./AgentsEditor.tsx";
 import { HostSetup } from "./HostSetup.tsx";
 import { relativeTime } from "./StatusDot.tsx";
 
 export function Settings({
   states,
   now,
+  configs,
   onSave,
   onRemove,
   onMove,
+  onAgentsSaved,
   onClose,
 }: {
   states: HostState[];
   now: number;
+  configs: Map<string, AgentsConfigResponse>;
   onSave: (entry: HostEntry) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: -1 | 1) => void;
+  onAgentsSaved: () => void;
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState<HostEntry | "new" | null>(null);
@@ -135,6 +140,11 @@ export function Settings({
                 Add host
               </button>
             )}
+          </section>
+
+          <section>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-neutral-500">Agents</h3>
+            <AgentsEditor states={states} configs={configs} onSaved={onAgentsSaved} />
           </section>
 
           <section>

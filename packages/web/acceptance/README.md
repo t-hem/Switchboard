@@ -10,6 +10,11 @@ mocks, no stubs. They cover the parts of the spec that otherwise need a human.
   the other two stay fully usable while the third is marked offline. Also covers
   reorder persistence and remove-with-confirmation. It starts nothing itself — see
   the runner below.
+- `agent-sync.mjs` (phase 3.5): the `/config/agents` contract (409 on a stale write,
+  `?force=1`, malformed maps refused), drift detection, the diff view, sync-all, the
+  copyable install hint, and availability flipping on one host only. Give exactly one
+  host a `pathPrepend` pointing at `INSTALL_DIR`; the harness drops a fake executable
+  there to stand in for installing the CLI on that machine.
 
 Puppeteer is deliberately **not** a declared dependency: it downloads its own
 Chromium (~150 MB), which is a steep price on every `npm install` for a tool that is
@@ -57,3 +62,5 @@ Screenshots are written to `OUT_DIR`.
   headless Chrome. Use the `setInput` helper (select-all, delete, type).
 - A run deliberately tests a wrong token first, so one `401` in the network log is
   expected. So is the `404` for `/favicon.ico` until the PWA assets land.
+- `innerText` does not include the *values* of form inputs. Assert on `el.value`
+  through `$$eval` rather than on page text when checking what a field holds.

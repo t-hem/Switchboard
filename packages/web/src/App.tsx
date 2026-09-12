@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HostSetup } from "./components/HostSetup.tsx";
 import { NewSessionModal } from "./components/NewSessionModal.tsx";
+import { DriftBanner, DriftReview } from "./components/AgentSync.tsx";
 import { OrphanBanner } from "./components/OrphanBanner.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { TerminalView } from "./components/TerminalView.tsx";
 import { loadHosts, saveHosts } from "./state/hosts.ts";
+import { useAgentConfigs } from "./state/useAgentConfigs.ts";
 import { useFleet } from "./state/useFleet.ts";
 import type { HostEntry } from "./types.ts";
 
@@ -34,6 +36,13 @@ export function App() {
   }, []);
   const [newSessionFor, setNewSessionFor] = useState<string | null | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  const orderedStatesForConfig = useMemo(
+    () => hosts.map((h) => states.get(h.id)).filter((s): s is NonNullable<typeof s> => s !== undefined),
+    [hosts, states],
+  );
+  const { configs, drift, refresh: refreshConfigs } = useAgentConfigs(orderedStatesForConfig);
 
   const orderedStates = useMemo(
     () => hosts.map((h) => states.get(h.id)).filter((s): s is NonNullable<typeof s> => s !== undefined),
@@ -111,6 +120,9 @@ export function App() {
   return (
     <div className="flex h-full flex-col">
       <OrphanBanner states={orderedStates} onDone={refresh} />
+      {drift && !reviewOpen && (
+        <DriftBanner drift={drift} states={orderedStates} onReview={() => setReviewOpen(true)} />
+      )}
 
       <div className="flex min-h-0 flex-1">
         <aside
@@ -130,7 +142,11 @@ export function App() {
               aria-label="Settings"
               title="Settings"
               className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                // Spec §5.5: re-read the agents map whenever settings is opened.
+                refreshConfigs();
+                setSettingsOpen(true);
+              }}
             >
               ⚙
             </button>
@@ -168,10 +184,22 @@ export function App() {
         <Settings
           states={orderedStates}
           now={now}
+          configs={configs}
           onSave={saveHost}
           onRemove={removeHost}
           onMove={moveHost}
+          onAgentsSaved={refreshConfigs}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {reviewOpen && drift && (
+        <DriftReview
+          drift={drift}
+          states={orderedStates}
+          configs={configs}
+          onClose={() => setReviewOpen(false)}
+          onSynced={refreshConfigs}
         />
       )}
 

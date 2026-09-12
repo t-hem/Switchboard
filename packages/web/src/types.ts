@@ -42,6 +42,26 @@ export type OrphanKillResult = {
   detail?: string;
 };
 
+export type AgentPlatformOverride = { cmd?: string; args?: string[] };
+
+export type AgentDef = {
+  cmd: string;
+  args?: string[];
+  /** Display-only. The daemon never runs this. */
+  install?: string;
+  platform?: Record<string, AgentPlatformOverride>;
+};
+
+export type AgentsConfig = {
+  updatedAt: number;
+  agents: Record<string, AgentDef>;
+};
+
+export type AgentsConfigResponse = AgentsConfig & {
+  /** Per-host and never synced: the entry travels, the binary does not. */
+  availability: Record<string, boolean>;
+};
+
 export type HostEntry = {
   id: string;
   label: string;

@@ -1,4 +1,12 @@
-import type { Health, HostEntry, Orphan, OrphanKillResult, Session } from "../types.ts";
+import type {
+  AgentsConfig,
+  AgentsConfigResponse,
+  Health,
+  HostEntry,
+  Orphan,
+  OrphanKillResult,
+  Session,
+} from "../types.ts";
 
 /** Requests that take longer than this are treated as a host being down. */
 const REQUEST_TIMEOUT_MS = 3000;
@@ -72,6 +80,20 @@ export const api = {
   workspaces: (entry: HostEntry): Promise<string[]> => request(entry, "/workspaces", {}, 8000),
 
   orphans: (entry: HostEntry): Promise<Orphan[]> => request(entry, "/orphans"),
+
+  agentsConfig: (entry: HostEntry): Promise<AgentsConfigResponse> => request(entry, "/config/agents"),
+
+  putAgentsConfig: (
+    entry: HostEntry,
+    config: AgentsConfig,
+    force = false,
+  ): Promise<AgentsConfigResponse> =>
+    request(
+      entry,
+      `/config/agents${force ? "?force=1" : ""}`,
+      { method: "PUT", body: JSON.stringify(config) },
+      8000,
+    ),
 
   killOrphans: (entry: HostEntry, ids?: string[]): Promise<OrphanKillResult[]> =>
     request(entry, "/orphans/kill", { method: "POST", body: JSON.stringify({ ids }) }, 15000),
