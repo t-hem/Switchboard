@@ -23,6 +23,7 @@ export function SessionList({
     <div className="flex flex-col">
       {states.map((state) => {
         const rows = merged.filter((r) => r.hostId === state.entry.id);
+        const reachable = state.status === "ok";
         return (
           <section key={state.entry.id}>
             <HostHeader state={state} now={now} onNewSession={() => onNewSession(state.entry.id)} />
@@ -37,19 +38,22 @@ export function SessionList({
                   selectedId === session.id
                     ? "border-l-neutral-300 bg-neutral-800/60"
                     : "border-l-transparent hover:bg-neutral-900"
-                }`}
+                } ${reachable ? "" : "opacity-50"}`}
               >
-                <StatusDot activity={activityOf(session, now)} />
+                <StatusDot activity={reachable ? activityOf(session, now) : "unknown"} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-neutral-200">{session.label}</span>
                   <span className="block truncate text-xs text-neutral-500">
-                    {session.status === "exited"
-                      ? `exited${session.exitCode !== null ? ` (${session.exitCode})` : ""}`
-                      : relativeTime(session.lastOutputAt, now)}
+                    {!reachable
+                      ? "host unreachable — state unknown"
+                      : session.status === "exited"
+                        ? `exited${session.exitCode !== null ? ` (${session.exitCode})` : ""}`
+                        : relativeTime(session.lastOutputAt, now)}
                     {" · pid "}
                     {session.pid}
                   </span>
                 </span>
+                {reachable && (
                 <span
                   role="button"
                   tabIndex={0}
@@ -67,6 +71,7 @@ export function SessionList({
                 >
                   ✕
                 </span>
+                )}
               </button>
             ))}
           </section>

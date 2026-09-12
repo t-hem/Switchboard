@@ -4,7 +4,7 @@ import type { Session } from "../types.ts";
  * Amber — running but silent for a while — is the state the whole app exists to
  * surface: it almost always means the agent is sitting on a permission prompt.
  */
-export type Activity = "working" | "quiet" | "waiting" | "exited";
+export type Activity = "working" | "quiet" | "waiting" | "exited" | "unknown";
 
 const WORKING_MS = 5_000;
 const WAITING_MS = 20_000;
@@ -22,6 +22,10 @@ const STYLES: Record<Activity, { dot: string; label: string }> = {
   quiet: { dot: "bg-emerald-400/40", label: "idle" },
   waiting: { dot: "bg-amber-400", label: "probably waiting for input" },
   exited: { dot: "bg-neutral-600", label: "exited" },
+  // Host unreachable: the last known timestamp says nothing about what the session
+  // is doing now, and this dot is the app's most important signal — it must not
+  // claim "working" for something it cannot see.
+  unknown: { dot: "bg-transparent ring-1 ring-neutral-600", label: "unknown — host unreachable" },
 };
 
 export function StatusDot({ activity }: { activity: Activity }) {

@@ -1,9 +1,15 @@
 # Browser acceptance
 
-`ui.mjs` drives the **built client in a real Chromium** against a **real daemon** —
-no mocks, no stubs. It covers the parts of the spec that otherwise need a human:
-the setup screen, the session list, the new-session modal, attaching to a terminal,
-typing into the pty, reflow on resize, and killing a session.
+These drive the **built client in a real Chromium** against **real daemons** — no
+mocks, no stubs. They cover the parts of the spec that otherwise need a human.
+
+- `ui.mjs` (phase 2): setup screen, session list, new-session modal, attaching to a
+  terminal, typing into the pty, reflow on resize, killing a session.
+- `multi-host.mjs` (phase 3): three daemons on three ports, a live session on each,
+  driving all three from one browser, then `SIGKILL`ing the middle one and checking
+  the other two stay fully usable while the third is marked offline. Also covers
+  reorder persistence and remove-with-confirmation. It starts nothing itself — see
+  the runner below.
 
 Puppeteer is deliberately **not** a declared dependency: it downloads its own
 Chromium (~150 MB), which is a steep price on every `npm install` for a tool that is
@@ -31,7 +37,17 @@ OUT_DIR=/tmp \
 node packages/web/acceptance/ui.mjs
 ```
 
-Screenshots of the terminal and the mobile layout are written to `OUT_DIR`.
+`multi-host.mjs` additionally wants a `HOSTS` env var describing the fleet:
+
+```bash
+HOSTS='[{"label":"alpha","url":"http://127.0.0.1:7791","token":"...","pid":1234}, ...]'
+```
+
+`pid` is the daemon's process id — the harness kills it to simulate a machine going
+down, so resolve it from the listening port (`ss -lptn "sport = :7791"`) rather than
+from a shell job id, which would only be the `npx` wrapper.
+
+Screenshots are written to `OUT_DIR`.
 
 ## Notes for anyone extending it
 

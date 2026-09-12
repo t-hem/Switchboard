@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "accept:ui": "node acceptance/ui.mjs"
+    "accept:ui": "node acceptance/ui.mjs",
+    "accept:multi": "node acceptance/multi-host.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

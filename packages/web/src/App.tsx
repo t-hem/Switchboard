@@ -4,6 +4,7 @@ import { HostSetup } from "./components/HostSetup.tsx";
 import { NewSessionModal } from "./components/NewSessionModal.tsx";
 import { OrphanBanner } from "./components/OrphanBanner.tsx";
 import { SessionList } from "./components/SessionList.tsx";
+import { Settings } from "./components/Settings.tsx";
 import { TerminalView } from "./components/TerminalView.tsx";
 import { loadHosts, saveHosts } from "./state/hosts.ts";
 import { useFleet } from "./state/useFleet.ts";
@@ -32,19 +33,53 @@ export function App() {
     setSelected({ hostId, sessionId, at: Date.now() });
   }, []);
   const [newSessionFor, setNewSessionFor] = useState<string | null | undefined>(undefined);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const orderedStates = useMemo(
     () => hosts.map((h) => states.get(h.id)).filter((s): s is NonNullable<typeof s> => s !== undefined),
     [hosts, states],
   );
 
-  const addHost = useCallback((entry: HostEntry) => {
+  const persist = useCallback((update: (prev: HostEntry[]) => HostEntry[]) => {
     setHosts((prev) => {
-      const next = [...prev.filter((h) => h.id !== entry.id), entry];
+      const next = update(prev);
       saveHosts(next);
       return next;
     });
   }, []);
+
+  /** Add a new host, or replace an existing one in place so its position is kept. */
+  const saveHost = useCallback(
+    (entry: HostEntry) =>
+      persist((prev) =>
+        prev.some((h) => h.id === entry.id)
+          ? prev.map((h) => (h.id === entry.id ? entry : h))
+          : [...prev, entry],
+      ),
+    [persist],
+  );
+
+  const removeHost = useCallback(
+    (id: string) => {
+      persist((prev) => prev.filter((h) => h.id !== id));
+      setSelected((current) => (current?.hostId === id ? null : current));
+    },
+    [persist],
+  );
+
+  const moveHost = useCallback(
+    (id: string, direction: -1 | 1) =>
+      persist((prev) => {
+        const index = prev.findIndex((h) => h.id === id);
+        const target = index + direction;
+        if (index < 0 || target < 0 || target >= prev.length) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(index, 1);
+        if (moved) next.splice(target, 0, moved);
+        return next;
+      }),
+    [persist],
+  );
 
   const selectedEntry = hosts.find((h) => h.id === selected?.hostId) ?? null;
   const selectedSession =
@@ -67,7 +102,7 @@ export function App() {
           <p className="mb-4 mt-1 text-sm text-neutral-400">
             Add the host daemon to connect to. Its address and token are printed when it starts.
           </p>
-          <HostSetup onSave={addHost} />
+          <HostSetup onSave={saveHost} />
         </div>
       </div>
     );
@@ -90,6 +125,14 @@ export function App() {
               onClick={() => setNewSessionFor(null)}
             >
               New session
+            </button>
+            <button
+              aria-label="Settings"
+              title="Settings"
+              className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+              onClick={() => setSettingsOpen(true)}
+            >
+              ⚙
             </button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -120,6 +163,17 @@ export function App() {
           )}
         </main>
       </div>
+
+      {settingsOpen && (
+        <Settings
+          states={orderedStates}
+          now={now}
+          onSave={saveHost}
+          onRemove={removeHost}
+          onMove={moveHost}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {newSessionFor !== undefined && (
         <NewSessionModal

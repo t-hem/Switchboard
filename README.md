@@ -20,7 +20,7 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 | 0 | Scaffold, config files, `/health` | done |
 | 1 | Host daemon: PTY sessions, scrollback, REST, WS | done |
 | 2 | Client against a single host | done |
-| 3 | Multi-host fan-out | not started |
+| 3 | Multi-host fan-out | done |
 | 3.5 | Agent config sync | not started |
 | 4 | Client lock / takeover | not started |
 | 5 | Mobile polish, PWA, `tailscale serve` | not started |
