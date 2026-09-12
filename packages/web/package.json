@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "accept:ui": "node acceptance/ui.mjs",
     "accept:multi": "node acceptance/multi-host.mjs",
-    "accept:sync": "node acceptance/agent-sync.mjs"
+    "accept:sync": "node acceptance/agent-sync.mjs",
+    "accept:claim": "node acceptance/claim.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

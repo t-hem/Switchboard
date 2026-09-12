@@ -1,5 +1,6 @@
 import type {
   AgentsConfig,
+  ClaimResult,
   AgentsConfigResponse,
   Health,
   HostEntry,
@@ -81,6 +82,9 @@ export const api = {
 
   orphans: (entry: HostEntry): Promise<Orphan[]> => request(entry, "/orphans"),
 
+  claim: (entry: HostEntry, clientId: string, clientLabel: string): Promise<ClaimResult> =>
+    request(entry, "/control/claim", { method: "POST", body: JSON.stringify({ clientId, clientLabel }) }),
+
   agentsConfig: (entry: HostEntry): Promise<AgentsConfigResponse> => request(entry, "/config/agents"),
 
   putAgentsConfig: (
@@ -99,11 +103,20 @@ export const api = {
     request(entry, "/orphans/kill", { method: "POST", body: JSON.stringify({ ids }) }, 15000),
 };
 
-/** The WebSocket URL for a session, with the token as a query param (browsers
- *  cannot set headers on a WebSocket). */
-export function streamUrl(entry: HostEntry, sessionId: string): string {
+/**
+ * The WebSocket URL for a session. Both the token and the client identity travel as
+ * query params because browsers cannot set headers on a WebSocket; the daemon uses
+ * the identity to enforce the single-client lock before upgrading.
+ */
+export function streamUrl(
+  entry: HostEntry,
+  sessionId: string,
+  clientId: string,
+  clientLabel: string,
+): string {
   const base = normaliseBaseUrl(entry.baseUrl).replace(/^http/i, "ws");
-  return `${base}/sessions/${sessionId}/stream?token=${encodeURIComponent(entry.token)}`;
+  const query = new URLSearchParams({ token: entry.token, clientId, clientLabel });
+  return `${base}/sessions/${sessionId}/stream?${query.toString()}`;
 }
 
 export { normaliseBaseUrl };

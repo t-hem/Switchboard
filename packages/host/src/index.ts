@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { configDir, loadHostConfig } from "./config.js";
 import { SessionLedger } from "./ledger.js";
+import { ClaimRegistry } from "./claim.js";
 import { AgentRegistry } from "./registry.js";
 import { buildServer } from "./server.js";
 import { SessionManager } from "./sessions.js";
@@ -15,12 +16,14 @@ async function main(): Promise<void> {
   const registry = AgentRegistry.load(config);
   const ledger = SessionLedger.loadAndReconcile();
   const sessions = new SessionManager(config, registry, ledger);
+  const claims = new ClaimRegistry();
 
   const app = await buildServer({
     hostConfig: config,
     registry,
     sessions,
     ledger,
+    claims,
     version: pkg.version,
   });
 

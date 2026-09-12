@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { clientLabel, setClientLabel } from "../state/hosts.ts";
+import { setClientLabel } from "../state/hosts.ts";
 import type { AgentsConfigResponse, HostEntry, HostState } from "../types.ts";
 import { AgentsEditor } from "./AgentsEditor.tsx";
 import { HostSetup } from "./HostSetup.tsx";
@@ -14,6 +14,8 @@ export function Settings({
   onRemove,
   onMove,
   onAgentsSaved,
+  clientLabel,
+  onClientLabelChange,
   onClose,
 }: {
   states: HostState[];
@@ -23,10 +25,11 @@ export function Settings({
   onRemove: (id: string) => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onAgentsSaved: () => void;
+  clientLabel: string;
+  onClientLabelChange: (label: string) => void;
   onClose: () => void;
 }) {
   const [editing, setEditing] = useState<HostEntry | "new" | null>(null);
-  const [label, setLabel] = useState(() => clientLabel());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
 
   return (
@@ -155,9 +158,9 @@ export function Settings({
               </span>
               <input
                 className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-500"
-                value={label}
+                value={clientLabel}
                 onChange={(e) => {
-                  setLabel(e.target.value);
+                  onClientLabelChange(e.target.value);
                   setClientLabel(e.target.value);
                 }}
               />

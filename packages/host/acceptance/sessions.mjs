@@ -23,8 +23,15 @@ const api = (p, init = {}) =>
     headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json", ...init.headers },
   });
 
+// The daemon enforces a single-client lock, so every stream carries a client
+// identity. One identity for the whole harness means it holds the claim throughout.
+const CLIENT_ID = "acceptance-harness";
+
 function connect(id, token = TOKEN) {
-  const ws = new WebSocket(`ws://127.0.0.1:${host.port}/sessions/${id}/stream?token=${token}`);
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${host.port}/sessions/${id}/stream?token=${token}` +
+      `&clientId=${CLIENT_ID}&clientLabel=acceptance`,
+  );
   ws.binaryType = "nodebuffer";
   const state = { out: Buffer.alloc(0), control: [], ws, closed: null };
   ws.on("message", (d, isBinary) => {

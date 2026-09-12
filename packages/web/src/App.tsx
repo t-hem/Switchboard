@@ -7,8 +7,9 @@ import { OrphanBanner } from "./components/OrphanBanner.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { TerminalView } from "./components/TerminalView.tsx";
-import { loadHosts, saveHosts } from "./state/hosts.ts";
+import { clientId as loadClientId, clientLabel as loadClientLabel, loadHosts, saveHosts } from "./state/hosts.ts";
 import { useAgentConfigs } from "./state/useAgentConfigs.ts";
+import { useClaim } from "./state/useClaim.ts";
 import { useFleet } from "./state/useFleet.ts";
 import type { HostEntry } from "./types.ts";
 
@@ -24,6 +25,11 @@ function useNow(intervalMs = 1000): number {
 
 export function App() {
   const [hosts, setHosts] = useState<HostEntry[]>(() => loadHosts());
+  const clientId = useMemo(() => loadClientId(), []);
+  const [clientLabel, setClientLabelState] = useState(() => loadClientLabel());
+  const { claimAll } = useClaim(hosts, clientId, clientLabel);
+  const [evicted, setEvicted] = useState<{ hostId: string; reason: string } | null>(null);
+  const [takeBackNonce, setTakeBackNonce] = useState(0);
   const { states, merged, refresh } = useFleet(hosts);
   const now = useNow();
 
@@ -37,6 +43,13 @@ export function App() {
   const [newSessionFor, setNewSessionFor] = useState<string | null | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+
+  /** Re-claim every host, then remount the terminal so it reattaches and replays. */
+  const takeBack = useCallback(async () => {
+    await claimAll();
+    setEvicted(null);
+    setTakeBackNonce((n) => n + 1);
+  }, [claimAll]);
 
   const orderedStatesForConfig = useMemo(
     () => hosts.map((h) => states.get(h.id)).filter((s): s is NonNullable<typeof s> => s !== undefined),
@@ -119,6 +132,20 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
+      {evicted && (
+        <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-900/50 bg-amber-950/50 px-4 py-2 text-sm">
+          <span className="flex-1 text-amber-100">
+            Taken over by {evicted.reason.replace(/^claimed by /, "")}. Sessions are still running.
+          </span>
+          <button
+            className="rounded border border-amber-700/60 px-2 py-0.5 text-amber-100 hover:bg-amber-900/40"
+            onClick={() => void takeBack()}
+          >
+            Take back
+          </button>
+        </div>
+      )}
+
       <OrphanBanner states={orderedStates} onDone={refresh} />
       {drift && !reviewOpen && (
         <DriftBanner drift={drift} states={orderedStates} onReview={() => setReviewOpen(true)} />
@@ -167,10 +194,13 @@ export function App() {
         <main className={`min-w-0 flex-1 ${selected ? "flex" : "hidden md:flex"} flex-col`}>
           {selectedEntry && selectedSession ? (
             <TerminalView
-              key={selectedSession.id}
+              key={`${selectedSession.id}:${takeBackNonce}`}
               entry={selectedEntry}
               session={selectedSession}
+              clientId={clientId}
+              clientLabel={clientLabel}
               onBack={() => setSelected(null)}
+              onEvicted={(reason) => setEvicted({ hostId: selectedEntry.id, reason })}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
@@ -189,6 +219,8 @@ export function App() {
           onRemove={removeHost}
           onMove={moveHost}
           onAgentsSaved={refreshConfigs}
+          clientLabel={clientLabel}
+          onClientLabelChange={setClientLabelState}
           onClose={() => setSettingsOpen(false)}
         />
       )}

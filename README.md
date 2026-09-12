@@ -22,7 +22,7 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 | 2 | Client against a single host | done |
 | 3 | Multi-host fan-out | done |
 | 3.5 | Agent config sync | done |
-| 4 | Client lock / takeover | not started |
+| 4 | Client lock / takeover | done |
 | 5 | Mobile polish, PWA, `tailscale serve` | not started |
 
 ## Requirements
@@ -70,6 +70,7 @@ without it. CORS is permissive — the token is the gate, the tailnet is the bou
 | `POST` | `/sessions` | `{ agent, cwd, cols?, rows?, extraArgs?, label? }` → spawns a PTY, returns the session. Validates that the agent exists *and is installed here*, and that `cwd` is an existing directory. |
 | `GET` | `/sessions/:id` | One session, or 404. |
 | `DELETE` | `/sessions/:id` | SIGTERM, then SIGKILL after 3s. Answers 204 immediately; escalation continues in the background. |
+| `POST` | `/control/claim` | `{ clientId, clientLabel }` → takes the single-client lock, evicting the previous holder's streams. |
 | `GET` | `/workspaces` | Directories one level under `workspaceRoots` that contain a `.git`, cached 60s. |
 | `GET` | `/config/agents` | The agents map plus a per-host `availability` block. |
 | `PUT` | `/config/agents` | `{ agents, updatedAt }` → validated, written verbatim, re-probed, reloaded in place. 409 if the submitted `updatedAt` is older than the stored one, unless `?force=1`. |
@@ -112,6 +113,29 @@ add an agent once, sync, and the machines missing the binary show it greyed out 
 its `install` string as a copyable command. The gap between "configured" and
 "installed" cannot be closed remotely, so it is made visible and one paste wide
 instead. Installing the CLI flips it to available without a daemon restart.
+
+## One client at a time
+
+The multi-client problem is defined out of existence rather than solved. Each browser
+keeps a stable `clientId` in localStorage and claims every configured host on load
+and on window focus. A host has at most one claimant; when the claim moves, the
+previous holder's session streams are sent `{ type: "evicted", reason }` and closed,
+and a WebSocket upgrade from a non-claimant is refused with 403 before it upgrades.
+
+The evicted device shows a full-width banner naming who took over, with a *Take back*
+button that re-claims and reattaches.
+
+**Eviction only severs the view.** Nothing in the claim path touches a pty: sessions
+keep running, and the scrollback replayed to whoever attaches next contains
+everything both devices did.
+
+Claiming happens on load and on focus — deliberately never on a background
+reconnect. A phone waking in a pocket and silently stealing the session from the
+desktop you are working at would be worse than the problem the lock solves.
+
+A daemon with no claimant yet lets the first stream in, which takes the claim
+implicitly. Refusing until an explicit claim lands would make a freshly started
+daemon briefly unusable, and it weakens nothing — a later claim still evicts.
 
 ## Orphaned sessions
 

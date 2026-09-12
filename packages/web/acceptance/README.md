@@ -15,6 +15,10 @@ mocks, no stubs. They cover the parts of the spec that otherwise need a human.
   copyable install hint, and availability flipping on one host only. Give exactly one
   host a `pathPrepend` pointing at `INSTALL_DIR`; the harness drops a fake executable
   there to stand in for installing the CLI on that machine.
+- `claim.mjs` (phase 4): two independent browser contexts — separate localStorage,
+  so genuinely different devices with different client ids — sharing one host. Covers
+  takeover, the banner, 403 for a non-claimant at the upgrade, take-back, and that
+  the session keeps running with its scrollback intact throughout.
 
 Puppeteer is deliberately **not** a declared dependency: it downloads its own
 Chromium (~150 MB), which is a steep price on every `npm install` for a tool that is

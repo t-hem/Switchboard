@@ -15,14 +15,20 @@ const CONNECTION_LABEL: Record<ConnectionState, { text: string; className: strin
 export function TerminalView({
   entry,
   session,
+  clientId,
+  clientLabel,
   onBack,
+  onEvicted,
 }: {
   entry: HostEntry;
   session: Session;
+  clientId: string;
+  clientLabel: string;
   onBack: () => void;
+  onEvicted: (reason: string) => void;
 }) {
   const container = useRef<HTMLDivElement | null>(null);
-  const term = useTerminal(entry, session.id, container);
+  const term = useTerminal({ entry, sessionId: session.id, container, clientId, clientLabel, onEvicted });
   const status = CONNECTION_LABEL[term.state];
 
   return (
@@ -40,18 +46,6 @@ export function TerminalView({
         </span>
         <span className={`shrink-0 text-xs ${status.className}`}>{status.text}</span>
       </header>
-
-      {term.state === "evicted" && (
-        <div className="flex items-center gap-3 border-b border-amber-900/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-          <span className="flex-1">Taken over by {term.evictedBy}. The session is still running.</span>
-          <button
-            className="rounded border border-amber-700/60 px-2 py-0.5 hover:bg-amber-900/40"
-            onClick={term.reconnect}
-          >
-            Take back
-          </button>
-        </div>
-      )}
 
       {term.state === "exited" && (
         <div className="border-b border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-400">

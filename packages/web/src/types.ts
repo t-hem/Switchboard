@@ -69,6 +69,9 @@ export type HostEntry = {
   token: string;
 };
 
+export type Claimant = { clientId: string; clientLabel: string; claimedAt: number };
+export type ClaimResult = { claimant: Claimant; evicted: Claimant | null };
+
 /** Why a host is not usable right now — the client must tell these apart. */
 export type HostStatus = "ok" | "unauthorized" | "offline" | "checking";
 

@@ -33,11 +33,23 @@ export type TerminalHandle = {
  * reset first: without that, a reconnect would paint the history a second time
  * underneath the previous copy.
  */
-export function useTerminal(
-  entry: HostEntry | null,
-  sessionId: string | null,
-  container: React.RefObject<HTMLDivElement | null>,
-): TerminalHandle {
+export type TerminalOptions = {
+  entry: HostEntry | null;
+  sessionId: string | null;
+  container: React.RefObject<HTMLDivElement | null>;
+  clientId: string;
+  clientLabel: string;
+  onEvicted?: (reason: string) => void;
+};
+
+export function useTerminal({
+  entry,
+  sessionId,
+  container,
+  clientId,
+  clientLabel,
+  onEvicted,
+}: TerminalOptions): TerminalHandle {
   const [state, setState] = useState<ConnectionState>("connecting");
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [evictedBy, setEvictedBy] = useState<string | null>(null);
@@ -51,6 +63,10 @@ export function useTerminal(
   // A ref in a dependency array never re-triggers the effect, so the manual
   // reconnect has to be real state.
   const [reconnectNonce, setReconnectNonce] = useState(0);
+  // Held in a ref so the connection effect never re-runs just because the parent
+  // passed a fresh callback.
+  const onEvictedRef = useRef(onEvicted);
+  onEvictedRef.current = onEvicted;
 
   const send = useCallback((data: string) => {
     const socket = socketRef.current;
@@ -120,7 +136,7 @@ export function useTerminal(
 
     const connect = (): void => {
       if (closedRef.current) return;
-      const socket = new WebSocket(streamUrl(entry, sessionId));
+      const socket = new WebSocket(streamUrl(entry, sessionId, clientId, clientLabel));
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
 
@@ -144,9 +160,11 @@ export function useTerminal(
               setState("exited");
               closedRef.current = true;
             } else if (msg.type === "evicted") {
-              setEvictedBy(msg.reason ?? "another client");
+              const reason = msg.reason ?? "another client";
+              setEvictedBy(reason);
               setState("evicted");
               closedRef.current = true;
+              onEvictedRef.current?.(reason);
             }
           } catch {
             /* not a control frame we understand */
@@ -189,7 +207,7 @@ export function useTerminal(
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [entry, sessionId, container, reconnectNonce]);
+  }, [entry, sessionId, container, clientId, clientLabel, reconnectNonce]);
 
   return { state, exitCode, evictedBy, send, reconnect };
 }

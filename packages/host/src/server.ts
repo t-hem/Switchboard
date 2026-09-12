@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 
 import { parseAgentsPayload } from "./agentsvalidate.js";
 import { bearerToken, tokenMatches } from "./auth.js";
+import { ClaimRegistry, type EvictableSocket } from "./claim.js";
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
 import { SessionError, type SessionManager } from "./sessions.js";
@@ -22,11 +23,13 @@ export type ServerDeps = {
   registry: AgentRegistry;
   sessions: SessionManager;
   ledger: SessionLedger;
+  claims: ClaimRegistry;
   version: string;
 };
 
 type IdParams = { id: string };
-type StreamQuery = { token?: string };
+type StreamQuery = { token?: string; clientId?: string; clientLabel?: string };
+type ClaimBody = { clientId?: unknown; clientLabel?: unknown };
 
 type CreateSessionBody = {
   agent?: unknown;
@@ -117,10 +120,32 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         if (!tokenMatches(deps.hostConfig.token, req.query.token)) {
           return reply.code(401).send({ error: "unauthorized" });
         }
+        // The lock is checked before the upgrade, so a non-claimant gets a plain
+        // 403 rather than a socket that opens and is immediately severed.
+        const clientId = req.query.clientId ?? "";
+        if (!deps.claims.mayAttach(clientId)) {
+          return reply.code(403).send({
+            error: "another client holds this host",
+            claimedBy: deps.claims.current?.clientLabel ?? null,
+          });
+        }
       },
     },
     (socket, req) => {
       const { id } = req.params;
+      const clientId = req.query.clientId ?? "";
+      const clientLabel = req.query.clientLabel ?? "a client";
+
+      // Registering may implicitly claim an unclaimed host — see ClaimRegistry.
+      const evictable: EvictableSocket = {
+        evict: (reason: string) => {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify({ type: "evicted", reason }));
+            socket.close(4003, reason);
+          }
+        },
+      };
+      deps.claims.register(clientId, clientLabel, evictable);
 
       let detach: (() => void) | null = null;
       try {
@@ -171,6 +196,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const cleanup = (): void => {
         detach?.();
         detach = null;
+        deps.claims.unregister(clientId, evictable);
       };
       socket.on("close", cleanup);
       socket.on("error", cleanup);
@@ -218,6 +244,19 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       const terminated = deps.sessions.kill(req.params.id);
       terminated.catch((err: unknown) => console.error(`[session ${req.params.id}]`, err));
       return reply.code(204).send();
+    });
+
+    api.post<{ Body: ClaimBody }>("/control/claim", async (req) => {
+      const body = req.body ?? {};
+      const clientId = asString(body.clientId);
+      if (!clientId) throw new SessionError("clientId is required", 400);
+      const clientLabel = asString(body.clientLabel) ?? "a client";
+
+      const result = deps.claims.claim(clientId, clientLabel);
+      if (result.evicted) {
+        console.log(`[claim] ${clientLabel} took over from ${result.evicted.clientLabel}`);
+      }
+      return result;
     });
 
     api.get("/workspaces", async (): Promise<string[]> =>

@@ -1,5 +1,4 @@
 // Simulates a daemon crash and verifies orphan reconciliation end to end.
-import { WebSocket } from "ws";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";

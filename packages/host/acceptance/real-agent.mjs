@@ -35,8 +35,13 @@ async function render(bytes, cols = 100, rows = 30) {
   return lines.join("\n");
 }
 
+const CLIENT_ID = "acceptance-harness";
+
 function connect(id) {
-  const ws = new WebSocket(`ws://127.0.0.1:${host.port}/sessions/${id}/stream?token=${host.token}`);
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${host.port}/sessions/${id}/stream?token=${host.token}` +
+      `&clientId=${CLIENT_ID}&clientLabel=acceptance`,
+  );
   ws.binaryType = "nodebuffer";
   const st = { out: Buffer.alloc(0), control: [], ws };
   ws.on("message", (d, bin) => { if (bin) st.out = Buffer.concat([st.out, d]); else st.control.push(JSON.parse(d.toString())); });
