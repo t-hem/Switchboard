@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "accept:ui": "node acceptance/ui.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

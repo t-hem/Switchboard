@@ -19,7 +19,7 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 |---|---|---|
 | 0 | Scaffold, config files, `/health` | done |
 | 1 | Host daemon: PTY sessions, scrollback, REST, WS | done |
-| 2 | Client against a single host | not started |
+| 2 | Client against a single host | done |
 | 3 | Multi-host fan-out | not started |
 | 3.5 | Agent config sync | not started |
 | 4 | Client lock / takeover | not started |
@@ -196,10 +196,14 @@ npm test          # ring buffer + the ledger's PID-reuse guard (node:test)
 npm run typecheck
 ```
 
-Everything else is verified by the acceptance harnesses in
-[`packages/host/acceptance/`](./packages/host/acceptance/README.md), which drive a
-running daemon over the same HTTP + WebSocket surface the browser uses — including
-one that runs a real Claude Code session and asserts on the rendered screen.
+Everything else is verified by acceptance harnesses that drive real software rather
+than mocks:
+
+- [`packages/host/acceptance/`](./packages/host/acceptance/README.md) — drives a
+  running daemon over the same HTTP + WebSocket surface the browser uses, including
+  one harness that runs a real Claude Code session and asserts on the rendered screen.
+- [`packages/web/acceptance/`](./packages/web/acceptance/README.md) — drives the
+  built client in a real Chromium against a real daemon.
 
 ## Layout
 
@@ -217,4 +221,10 @@ packages/host   Node 22 + TypeScript daemon (Fastify, node-pty)
   acceptance/         harnesses for the manual acceptance steps
 
 packages/web    React + Vite + Tailwind static client (xterm.js)
+  src/api/client.ts       typed fetch wrappers, per-request timeouts
+  src/state/hosts.ts      host registry in localStorage
+  src/state/useFleet.ts   parallel polling, one host's failure isolated from the rest
+  src/hooks/useTerminal.ts xterm <-> WebSocket binding, reconnect backoff, resize
+  src/components/         session list, terminal, modals, banners
+  acceptance/             browser-driven acceptance
 ```
