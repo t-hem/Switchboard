@@ -1,6 +1,7 @@
 import { useRef } from "react";
 
 import { useTerminal, type ConnectionState } from "../hooks/useTerminal.ts";
+import { MobileInputBar } from "./MobileInputBar.tsx";
 import type { HostEntry, Session } from "../types.ts";
 
 const CONNECTION_LABEL: Record<ConnectionState, { text: string; className: string }> = {
@@ -56,6 +57,11 @@ export function TerminalView({
 
       <div className="min-h-0 flex-1 overflow-hidden bg-[#0b0d10] p-1">
         <div ref={container} className="h-full w-full" />
+      </div>
+
+      {/* Phone only: on a desktop the real keyboard is already the better input. */}
+      <div className="md:hidden">
+        <MobileInputBar send={term.send} disabled={term.state !== "connected"} />
       </div>
     </div>
   );

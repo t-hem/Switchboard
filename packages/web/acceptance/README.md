@@ -19,6 +19,12 @@ mocks, no stubs. They cover the parts of the spec that otherwise need a human.
   so genuinely different devices with different client ids — sharing one host. Covers
   takeover, the banner, 403 for a non-claimant at the upgrade, take-back, and that
   the session keeps running with its scrollback intact throughout.
+- `mobile.mjs` (phase 5): a real phone viewport. PWA manifest and icons, service
+  worker registration, the full-screen list/terminal split, answering a permission
+  prompt with quick-send buttons only, the line-input bar, and the exact bytes each
+  quick key emits (asserted against `cat -v`, so `Esc` really is `0x1b` and `↑`
+  really is `CSI A`). Needs `prompt`, `raw` and `interruptible` agents — see the
+  script header.
 
 Puppeteer is deliberately **not** a declared dependency: it downloads its own
 Chromium (~150 MB), which is a steep price on every `npm install` for a tool that is
@@ -66,5 +72,8 @@ Screenshots are written to `OUT_DIR`.
   headless Chrome. Use the `setInput` helper (select-all, delete, type).
 - A run deliberately tests a wrong token first, so one `401` in the network log is
   expected. So is the `404` for `/favicon.ico` until the PWA assets land.
+- Never navigate the page yourself (`page.goBack()`); use the app's own controls.
+  `evaluateOnNewDocument` runs on `about:blank` too, where touching `localStorage`
+  throws a `SecurityError` that surfaces as a page error and fails later assertions.
 - `innerText` does not include the *values* of form inputs. Assert on `el.value`
   through `$$eval` rather than on page text when checking what a field holds.

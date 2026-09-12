@@ -117,7 +117,7 @@ export function AgentsEditor({
       )}
 
       {raw === null ? (
-        <ul className="space-y-2">
+        <ul className="space-y-2" aria-label="Configured agents">
           {Object.entries(draft).map(([name, def]) => (
             <AgentRow
               key={name}

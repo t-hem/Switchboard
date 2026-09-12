@@ -156,10 +156,11 @@ ok("a surviving host is still drivable", await waitTerm("STILL_WORKS_AFTER_OUTAG
 console.log("\n=== reorder and remove ===");
 await page.click('button[aria-label="Settings"]');
 await waitFor("Add host");
-const orderBefore = await page.$$eval("section li", (els) => els.map((e) => e.innerText.split("\n")[0]));
+const HOST_ROWS = 'ul[aria-label="Configured hosts"] > li';
+const orderBefore = await page.$$eval(HOST_ROWS, (els) => els.map((e) => e.innerText.split("\n")[0]));
 await page.click('button[aria-label="Move down"]');
 await sleep(400);
-const orderAfter = await page.$$eval("section li", (els) => els.map((e) => e.innerText.split("\n")[0]));
+const orderAfter = await page.$$eval(HOST_ROWS, (els) => els.map((e) => e.innerText.split("\n")[0]));
 ok("reorder changes the order", JSON.stringify(orderBefore) !== JSON.stringify(orderAfter),
    `${orderBefore.join(",")} -> ${orderAfter.join(",")}`);
 
@@ -167,16 +168,17 @@ await page.reload({ waitUntil: "networkidle2" });
 await sleep(1500);
 await page.click('button[aria-label="Settings"]');
 await waitFor("Add host");
-const orderReloaded = await page.$$eval("section li", (els) => els.map((e) => e.innerText.split("\n")[0]));
+const orderReloaded = await page.$$eval(HOST_ROWS, (els) => els.map((e) => e.innerText.split("\n")[0]));
 ok("order survives a reload", JSON.stringify(orderReloaded) === JSON.stringify(orderAfter),
    `${orderReloaded.join(",")}`);
 
-ok("remove asks for confirmation first", await clickText("section li button", "Remove"));
+ok("remove asks for confirmation first", await clickText(`${HOST_ROWS} button`, "Remove"));
 await sleep(300);
 ok("confirm prompt shown", has(await text(), "Really remove"));
-await clickText("section li button", "Really remove");
+await clickText(`${HOST_ROWS} button`, "Really remove");
 await sleep(500);
-const remaining = await page.$$eval("section li", (els) => els.length);
+// Scoped to the hosts list: the agents editor also renders <li> rows.
+const remaining = await page.$$eval(HOST_ROWS, (els) => els.length);
 ok("host removed", remaining === HOSTS.length - 1, `${remaining} left`);
 
 ok("no uncaught exceptions", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));

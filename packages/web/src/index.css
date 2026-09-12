@@ -10,8 +10,16 @@ body,
   height: 100%;
 }
 
+/* Dynamic viewport height: on mobile the browser chrome and the soft keyboard both
+   change the usable height, and 100vh ignores each of them. */
+#root {
+  height: 100dvh;
+}
+
 body {
   margin: 0;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
   background: #0b0d10;
   color: #e6e8eb;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;

@@ -48,7 +48,7 @@ export function Settings({
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
           <section>
             <h3 className="mb-2 text-xs uppercase tracking-wide text-neutral-500">Hosts</h3>
-            <ul className="space-y-2">
+            <ul className="space-y-2" aria-label="Configured hosts">
               {states.map((state, index) => (
                 <li key={state.entry.id} className="rounded border border-neutral-800 bg-neutral-900/50 p-3">
                   {editing !== "new" && editing?.id === state.entry.id ? (

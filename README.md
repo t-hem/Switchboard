@@ -23,7 +23,7 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 | 3 | Multi-host fan-out | done |
 | 3.5 | Agent config sync | done |
 | 4 | Client lock / takeover | done |
-| 5 | Mobile polish, PWA, `tailscale serve` | not started |
+| 5 | Mobile polish, PWA, `tailscale serve` | done |
 
 ## Requirements
 
@@ -224,6 +224,51 @@ cannot see them and reports them unavailable. Fix it in that machine's `host.jso
 every machine in the fleet, so a path that is correct on one is wrong everywhere else.
 `agents.json` names bare commands (`"cmd": "claude"`); `host.json` says where this
 machine finds them.
+
+## Serving it over the tailnet
+
+The client is a static bundle; any host can serve it. `tailscale serve` supplies the
+HTTPS origin, which is also what makes the app installable to a phone home screen.
+
+**Every daemon needs to be served over HTTPS too, not just the client.** A page
+loaded over `https://` cannot fetch `http://` or open `ws://` — browsers block it as
+mixed content, with no useful error. Serving the client over TLS while leaving the
+daemons on plain `http://…:7777` produces an app where every host silently shows as
+offline.
+
+On **each** machine, expose its daemon:
+
+```bash
+tailscale serve --bg --https=8443 7777
+# -> https://<machine>.<tailnet>.ts.net:8443
+```
+
+On **one** machine, also serve the built client:
+
+```bash
+npm run build -w @switchboard/web
+tailscale serve --bg --https=443 /absolute/path/to/packages/web/dist
+# -> https://<machine>.<tailnet>.ts.net
+```
+
+Then open that URL, and add each host as `https://<machine>.<tailnet>.ts.net:8443`
+with the token from that machine's `host.json`. WebSockets are proxied as `wss://`
+automatically.
+
+`tailscale serve status` shows what is exposed; `tailscale serve reset` removes it.
+Nothing here is exposed to the public internet — that would be `tailscale funnel`,
+which this does not use.
+
+## Installing to a phone
+
+Open the HTTPS URL and use *Add to Home Screen*. The app then launches standalone,
+and the terminal view gets a line-input bar pinned above the keyboard plus quick-send
+buttons for `y`, `n`, `Esc`, `Ctrl-C`, `↑` and `Enter` — permission prompts and menu
+selections are the overwhelming majority of phone interactions, and a raw terminal
+against a soft keyboard is miserable for both.
+
+The service worker only ever caches this app's own origin. Host responses are never
+cached: a stale session list is worse than no session list.
 
 ## Running the daemon from a clean shell
 
