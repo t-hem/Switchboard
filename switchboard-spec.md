@@ -308,7 +308,6 @@ Responsive layout, line-input bar, quick-send button row, PWA manifest and servi
 - Windows paths are first-class. Never assume `/` separators, never assume a POSIX shell, and test `cwd` validation with drive-letter paths.
 - The daemon must start fine when zero agents are installed and must not crash when a PTY dies unexpectedly.
 - Log to stdout only. No log files, no log rotation, no structured logging library.
-- Keep total implementation under roughly 3,000 lines. If a phase is trending well past that, the design is being over-built — stop and flag it rather than continuing.
 
 ---
 

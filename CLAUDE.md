@@ -104,5 +104,3 @@ the ledger exists to prevent. If a kill cannot be confirmed, report `failed` and
   claim state machine — using `node:test`. No UI tests.
 - Log to stdout with `console.log`. No log files, no logging library.
 - Windows paths are first-class: never assume `/` separators or a POSIX shell.
-- Keep the whole implementation under roughly 3,000 lines. If a phase blows past that,
-  stop and flag it rather than continuing.
