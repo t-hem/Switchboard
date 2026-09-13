@@ -10,6 +10,7 @@ const CONNECTION_LABEL: Record<ConnectionState, { text: string; className: strin
   reconnecting: { text: "reconnecting…", className: "text-amber-400" },
   exited: { text: "session exited", className: "text-neutral-500" },
   evicted: { text: "taken over", className: "text-amber-400" },
+  locked: { text: "locked by another client", className: "text-amber-400" },
   gone: { text: "session gone", className: "text-neutral-500" },
 };
 
@@ -20,6 +21,7 @@ export function TerminalView({
   clientLabel,
   onBack,
   onEvicted,
+  onTakeOver,
 }: {
   entry: HostEntry;
   session: Session;
@@ -27,6 +29,7 @@ export function TerminalView({
   clientLabel: string;
   onBack: () => void;
   onEvicted: (reason: string) => void;
+  onTakeOver: () => void;
 }) {
   const container = useRef<HTMLDivElement | null>(null);
   const term = useTerminal({ entry, sessionId: session.id, container, clientId, clientLabel, onEvicted });
@@ -47,6 +50,21 @@ export function TerminalView({
         </span>
         <span className={`shrink-0 text-xs ${status.className}`}>{status.text}</span>
       </header>
+
+      {term.state === "locked" && (
+        <div className="flex items-center gap-3 border-b border-amber-900/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+          <span className="flex-1">
+            {term.lockedBy ? `${term.lockedBy} holds this host.` : "Another client holds this host."} Reconnecting
+            cannot help until you take it back.
+          </span>
+          <button
+            className="shrink-0 rounded border border-amber-700/60 px-2 py-0.5 hover:bg-amber-900/40"
+            onClick={onTakeOver}
+          >
+            Take over
+          </button>
+        </div>
+      )}
 
       {term.state === "exited" && (
         <div className="border-b border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-400">

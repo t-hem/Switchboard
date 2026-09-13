@@ -71,6 +71,31 @@ tedious to hunt down. Two rules:
 Ledger entries are removed when a process *actually exits*, not when a kill is
 requested — so something that refuses to die stays on record as an orphan.
 
+### Windows is untested, and node-pty behaves differently there
+
+Two bugs have already been found by reading node-pty's source rather than running it.
+Both are the same shape: an API that is correct on POSIX and wrong on Windows.
+
+- `IPty.kill(signal)` **throws** on Windows ("Signals not supported on windows").
+  Passing a signal there means the kill never happens. Its bare `kill()` terminates
+  every process attached to the ConPTY console, i.e. the whole tree.
+- `pty.spawn(file)` goes straight to `CreateProcess`, which **cannot execute `.cmd`
+  or `.bat`**. npm-installed CLIs on Windows are `.cmd` shims, so they are run
+  through `cmd.exe /c`.
+
+Before changing anything in the spawn or kill path, check what node-pty actually does
+on both platforms — `node_modules/node-pty/src/` is readable and worth reading.
+See the Windows checklist in README.md for what has yet to be verified on real hardware.
+
+### Reporting a kill as successful requires observing the death
+
+`killOrphan` signals, then polls `identityMatches` until the process is gone, and only
+then reports `killed` and drops the ledger entry. An earlier version signalled and
+assumed success, which meant pressing *Kill all* on an agent that traps SIGTERM
+deleted its ledger entry while it kept running — creating exactly the untracked stray
+the ledger exists to prevent. If a kill cannot be confirmed, report `failed` and
+**keep the entry**.
+
 ## Conventions
 
 - TypeScript strict. No `any` outside narrow, commented interop points.

@@ -2,7 +2,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { streamUrl } from "../api/client.ts";
+import { probeStreamAccess, streamUrl } from "../api/client.ts";
 import type { HostEntry } from "../types.ts";
 
 export type ConnectionState =
@@ -11,6 +11,8 @@ export type ConnectionState =
   | "reconnecting"
   | "exited"
   | "evicted"
+  /** Another client holds this host's lock; retrying cannot help. */
+  | "locked"
   | "gone";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -21,6 +23,7 @@ export type TerminalHandle = {
   state: ConnectionState;
   exitCode: number | null;
   evictedBy: string | null;
+  lockedBy: string | null;
   /** Send text to the pty — used by the mobile line-input bar and quick keys. */
   send: (data: string) => void;
   reconnect: () => void;
@@ -53,6 +56,7 @@ export function useTerminal({
   const [state, setState] = useState<ConnectionState>("connecting");
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [evictedBy, setEvictedBy] = useState<string | null>(null);
+  const [lockedBy, setLockedBy] = useState<string | null>(null);
 
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -78,6 +82,7 @@ export function useTerminal({
   const reconnect = useCallback(() => {
     backoffRef.current = BACKOFF_START_MS;
     setEvictedBy(null);
+    setLockedBy(null);
     setReconnectNonce((n) => n + 1);
   }, []);
 
@@ -88,6 +93,7 @@ export function useTerminal({
     closedRef.current = false;
     setState("connecting");
     setExitCode(null);
+    setLockedBy(null);
 
     const term = new Terminal({
       cursorBlink: true,
@@ -183,6 +189,18 @@ export function useTerminal({
           return;
         }
         setState("reconnecting");
+        // Ask why, since the socket itself cannot say. Being locked out is not
+        // something backing off will ever fix.
+        void probeStreamAccess(entry, sessionId, clientId).then(({ locked, claimedBy }) => {
+          if (closedRef.current) return;
+          if (locked) {
+            setLockedBy(claimedBy);
+            setState("locked");
+            closedRef.current = true;
+            if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
+            return;
+          }
+        });
         const delay = backoffRef.current;
         backoffRef.current = Math.min(delay * 2, BACKOFF_MAX_MS);
         retryTimerRef.current = window.setTimeout(connect, delay);
@@ -209,5 +227,5 @@ export function useTerminal({
     };
   }, [entry, sessionId, container, clientId, clientLabel, reconnectNonce]);
 
-  return { state, exitCode, evictedBy, send, reconnect };
+  return { state, exitCode, evictedBy, lockedBy, send, reconnect };
 }

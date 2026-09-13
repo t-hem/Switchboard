@@ -9,8 +9,13 @@ export type Drift = {
   /** The host holding the newest map, which wins under last-write-wins. */
   newestHostId: string;
   newest: AgentsConfigResponse;
-  /** Reachable hosts whose map is not the newest one. */
+  /** Reachable hosts whose map differs from the newest one. */
   staleHostIds: string[];
+  /**
+   * Two hosts carry the same updatedAt but different contents. Last-write-wins has
+   * no answer here, so syncing will discard one side's edits — say so before doing it.
+   */
+  timestampConflict: boolean;
 };
 
 /**
@@ -59,21 +64,42 @@ export function useAgentConfigs(states: HostState[]): {
   return { configs, drift, refresh, loading };
 }
 
+/** Order-independent fingerprint of an agents map, so key order cannot fake a diff. */
+export function fingerprint(agents: AgentsConfigResponse["agents"]): string {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([k, v]) => [k, stable(v)]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(stable(agents));
+}
+
 export function computeDrift(configs: AgentConfigState, reachable: HostEntry[]): Drift | null {
   const present = reachable
     .map((e) => ({ hostId: e.id, config: configs.get(e.id) }))
     .filter((x): x is { hostId: string; config: AgentsConfigResponse } => x.config !== undefined);
   if (present.length < 2) return null;
 
-  const stamps = new Set(present.map((p) => p.config.updatedAt));
-  if (stamps.size === 1) return null;
+  // Contents, not just timestamps: two hosts can carry the same updatedAt and
+  // different agents (a clock skew, a restored backup, two edits in the same
+  // millisecond), and comparing stamps alone would call that "in sync".
+  const withPrints = present.map((p) => ({ ...p, print: fingerprint(p.config.agents) }));
+  if (new Set(withPrints.map((p) => p.print)).size === 1) return null;
 
   // Last write wins on the whole map, decided purely by updatedAt.
-  const newest = present.reduce((a, b) => (b.config.updatedAt > a.config.updatedAt ? b : a));
+  const newest = withPrints.reduce((a, b) => (b.config.updatedAt > a.config.updatedAt ? b : a));
+  const differing = withPrints.filter((p) => p.print !== newest.print);
   return {
     newestHostId: newest.hostId,
     newest: newest.config,
-    staleHostIds: present.filter((p) => p.config.updatedAt !== newest.config.updatedAt).map((p) => p.hostId),
+    staleHostIds: differing.map((p) => p.hostId),
+    timestampConflict: differing.some((p) => p.config.updatedAt === newest.config.updatedAt),
   };
 }
 

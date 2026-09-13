@@ -101,11 +101,23 @@ export class SessionManager {
     const cwd = validateCwd(opts.cwd);
     const cols = clampDimension(opts.cols, DEFAULT_COLS);
     const rows = clampDimension(opts.rows, DEFAULT_ROWS);
-    const args = [...resolvedAgent.args, ...(opts.extraArgs ?? [])];
+
+    // node-pty hands `file` straight to CreateProcess, which cannot execute batch
+    // files. npm installs CLIs on Windows as .cmd shims (claude.cmd, gemini.cmd), so
+    // the probe finds them and marks the agent available, and the spawn would then
+    // fail with "CreateProcess failed". Run those through the command interpreter.
+    // ConPTY's kill tears down every process attached to the console, so the extra
+    // cmd.exe layer does not leave the agent behind when the session is killed.
+    let file = executable;
+    let args = [...resolvedAgent.args, ...(opts.extraArgs ?? [])];
+    if (process.platform === "win32" && /\.(cmd|bat)$/i.test(executable)) {
+      args = ["/c", executable, ...args];
+      file = process.env["ComSpec"] ?? "cmd.exe";
+    }
 
     // The same environment object the availability probe used, so an agent can never
     // report available and then fail to launch (or the reverse).
-    const child = pty.spawn(executable, args, {
+    const child = pty.spawn(file, args, {
       name: "xterm-256color",
       cols,
       rows,
@@ -242,25 +254,42 @@ export class SessionManager {
 
   async #terminate(runtime: SessionRuntime): Promise<void> {
     const id = runtime.session.id;
-    // node-pty's kill() defaults to SIGHUP, which a process can legitimately ignore
-    // (and agent CLIs that detach from a closing terminal do). The signal is always
-    // named explicitly here.
     try {
-      runtime.pty.kill("SIGTERM");
+      this.#signal(runtime, false);
     } catch (err: unknown) {
-      console.error(`[session ${id}] SIGTERM failed:`, err);
+      console.error(`[session ${id}] terminate failed:`, err);
     }
     if (await this.#waitForExit(runtime, KILL_GRACE_MS)) return;
 
-    console.log(`[session ${id}] still alive after SIGTERM; escalating to SIGKILL`);
+    console.log(`[session ${id}] still alive after first signal; escalating`);
     try {
-      runtime.pty.kill("SIGKILL");
+      this.#signal(runtime, true);
     } catch {
       /* already gone */
     }
     if (!(await this.#waitForExit(runtime, KILL_ESCALATION_MS))) {
       console.error(`[session ${id}] pid ${runtime.session.pid} survived SIGKILL; left in the ledger`);
     }
+  }
+
+  /**
+   * Ask a pty to die, in the way the platform actually supports.
+   *
+   * POSIX: name the signal explicitly. node-pty defaults to SIGHUP, which a process
+   * can legitimately ignore — and agent CLIs that detach from a closing terminal do.
+   *
+   * Windows: node-pty *throws* if given any signal ("Signals not supported on
+   * windows"), so passing one would mean neither the terminate nor the escalation
+   * ever reached the process and every kill would silently do nothing. Its bare
+   * kill() terminates every process attached to the ConPTY console, which is the
+   * whole tree, so there is nothing to escalate to.
+   */
+  #signal(runtime: SessionRuntime, force: boolean): void {
+    if (process.platform === "win32") {
+      runtime.pty.kill();
+      return;
+    }
+    runtime.pty.kill(force ? "SIGKILL" : "SIGTERM");
   }
 
   #waitForExit(runtime: SessionRuntime, ms: number): Promise<boolean> {

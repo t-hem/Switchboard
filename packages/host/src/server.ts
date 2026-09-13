@@ -13,10 +13,20 @@ import { scanWorkspaces } from "./workspaces.js";
 
 /**
  * Above this many bytes queued on a socket, output is dropped rather than buffered.
- * A phone on a bad link must not be able to grow the daemon's heap without bound;
- * the terminal redraws on the next full repaint anyway.
+ * A phone on a bad link must not be able to grow the daemon's heap without bound.
+ *
+ * The drop is announced in the stream rather than done silently: a full-screen TUI
+ * repaints and recovers, but scrolling output would just be quietly missing lines,
+ * and a terminal that lies about what a command printed is worse than one that
+ * admits a gap. The scrollback ring buffer is unaffected, so reconnecting replays
+ * the real output.
  */
 const MAX_SOCKET_BACKLOG_BYTES = 8 * 1024 * 1024;
+const DROP_NOTICE = Buffer.from(
+  "\r\n\u001b[33m[switchboard] output dropped — link too slow; reconnect to replay\u001b[0m\r\n",
+  "utf8",
+);
+const RESUME_NOTICE = Buffer.from("\r\n\u001b[33m[switchboard] output resumed\u001b[0m\r\n", "utf8");
 
 export type ServerDeps = {
   hostConfig: HostConfig;
@@ -147,12 +157,24 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       };
       deps.claims.register(clientId, clientLabel, evictable);
 
+      let dropping = false;
       let detach: (() => void) | null = null;
       try {
         detach = deps.sessions.attach(id, {
           onData: (chunk) => {
             if (socket.readyState !== socket.OPEN) return;
-            if (socket.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) return;
+            if (socket.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) {
+              if (!dropping) {
+                dropping = true;
+                socket.send(DROP_NOTICE);
+                console.error(`[ws ${id}] backlog over ${MAX_SOCKET_BACKLOG_BYTES} bytes; dropping output`);
+              }
+              return;
+            }
+            if (dropping) {
+              dropping = false;
+              socket.send(RESUME_NOTICE);
+            }
             socket.send(chunk);
           },
           onExit: (exitCode) => {
@@ -298,7 +320,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
     api.post<{ Body: KillOrphansBody }>("/orphans/kill", async (req) => {
       const body = req.body ?? {};
-      return deps.ledger.killOrphans(asStringArray(body.ids), body.force === true);
+      return await deps.ledger.killOrphans(asStringArray(body.ids), body.force === true);
     });
   });
 

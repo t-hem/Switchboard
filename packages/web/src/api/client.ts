@@ -119,4 +119,42 @@ export function streamUrl(
   return `${base}/sessions/${sessionId}/stream?${query.toString()}`;
 }
 
+/**
+ * Why did a stream socket close?
+ *
+ * A failed WebSocket upgrade surfaces as a bare 1006 close with no status, so the
+ * client cannot tell "another device holds the lock" from "the wifi dropped" — and
+ * would otherwise retry forever with no explanation. The same route answers an
+ * ordinary GET, and its pre-upgrade hook returns 403 for a non-claimant, so asking
+ * over HTTP gives the answer the socket withheld.
+ */
+export async function probeStreamAccess(
+  entry: HostEntry,
+  sessionId: string,
+  clientId: string,
+): Promise<{ locked: boolean; claimedBy: string | null }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const query = new URLSearchParams({ token: entry.token, clientId });
+    const res = await fetch(
+      `${normaliseBaseUrl(entry.baseUrl)}/sessions/${sessionId}/stream?${query.toString()}`,
+      { signal: controller.signal },
+    );
+    if (res.status !== 403) return { locked: false, claimedBy: null };
+    let claimedBy: string | null = null;
+    try {
+      claimedBy = ((await res.json()) as { claimedBy?: string }).claimedBy ?? null;
+    } catch {
+      /* body is optional */
+    }
+    return { locked: true, claimedBy };
+  } catch {
+    // Unreachable: that is a network problem, not a lock. Keep retrying.
+    return { locked: false, claimedBy: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export { normaliseBaseUrl };

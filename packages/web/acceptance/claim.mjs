@@ -138,6 +138,43 @@ ok("desktop replay includes the phone's work", await desktop.waitTerm("WORK_FROM
 ok("phone now shows the takeover banner", await phone.waitFor("Taken over by desktop", 12000),
    (await phone.text()).slice(0, 240));
 
+console.log("\n=== a locked-out client says so instead of retrying forever ===");
+{
+  // The client normally claims on load, which self-heals a lockout. Block that one
+  // request so the 403 path is actually reachable and deterministic.
+  const locked = await device("locked-out", 1100, 800);
+  // Interception stays on for the life of the page; a flag decides what it does.
+  // Turning interception off while the listener is still attached makes the next
+  // abort() throw "Request Interception is not enabled!".
+  let blockClaims = true;
+  await locked.page.setRequestInterception(true);
+  locked.page.on("request", (req) => {
+    if (blockClaims && req.url().includes("/control/claim") && req.method() === "POST") {
+      return void req.abort();
+    }
+    void req.continue();
+  });
+  // Someone else holds the host.
+  await api("/control/claim", { method: "POST", body: JSON.stringify({ clientId: "holder", clientLabel: "workshop-pc" }) });
+  await locked.page.reload({ waitUntil: "networkidle2" });
+  await sleep(3000);
+  ok("locked client still sees the session list", await locked.openFirstSession());
+  ok("it reports being locked rather than reconnecting forever",
+     await locked.waitFor("holds this host", 25000), (await locked.text()).slice(0, 260));
+  ok("it names who holds it", (await locked.text()).includes("workshop-pc"), (await locked.text()).slice(0, 200));
+  ok("it is not stuck on 'reconnecting'", !(await locked.text()).includes("reconnecting"));
+  await locked.page.screenshot({ path: `${OUT}/claim-locked.png` });
+
+  // Allow claiming again, then take over.
+  blockClaims = false;
+  const btn = await locked.page.evaluateHandle(() =>
+    [...document.querySelectorAll("button")].find((b) => b.innerText.includes("Take over")) ?? null);
+  ok("take over is offered", btn.asElement() !== null);
+  if (btn.asElement()) await btn.asElement().click();
+  ok("taking over recovers the stream", await locked.waitFor("connected", 20000), (await locked.text()).slice(0, 200));
+  await locked.context.close();
+}
+
 console.log("\n=== the work survived all of it ===");
 const final = await (await api(`/sessions/${created.id}`)).json();
 ok("same session, same pid, still running", final.status === "running" && final.pid === created.pid,

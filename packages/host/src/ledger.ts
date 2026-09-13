@@ -21,6 +21,10 @@ export type OrphanKillResult = {
   detail?: string;
 };
 
+/** How long to wait for a signal to take effect before escalating or giving up. */
+export type KillTiming = { graceMs: number; escalationMs: number };
+export const DEFAULT_KILL_TIMING: KillTiming = { graceMs: 3000, escalationMs: 2000 };
+
 function isEntry(v: unknown): v is LedgerEntry {
   if (typeof v !== "object" || v === null) return false;
   const e = v as Record<string, unknown>;
@@ -107,37 +111,84 @@ export class SessionLedger {
    * Kill an orphan, but only after re-verifying that the pid is still the same
    * process we recorded. Between daemon startup and the operator pressing the button
    * the process may have exited and its pid been reused.
+   *
+   * Reports "killed" only once the process is *observed* to be gone. Signalling and
+   * assuming success is how the cleanup button ends up deleting the ledger entry for
+   * a process that is still running — leaving exactly the untracked stray the ledger
+   * exists to prevent. Agent CLIs that trap SIGTERM to clean up are precisely the
+   * population this applies to, so the entry is kept whenever the kill cannot be
+   * confirmed.
    */
-  killOrphan(id: string, force = false): OrphanKillResult {
+  async killOrphan(
+    id: string,
+    force = false,
+    timing: KillTiming = DEFAULT_KILL_TIMING,
+  ): Promise<OrphanKillResult> {
     const entry = this.#orphans.get(id);
     if (!entry) return { id, outcome: "unknown-session" };
 
     const current = processIdentity(entry.pid);
     if (current === null) {
-      this.#orphans.delete(id);
-      this.#persist();
+      this.#forget(id);
       return { id, outcome: "already-gone" };
     }
     if (current !== entry.processStartTime) {
       // pid recycled: whatever holds it now is not ours. Drop the entry, kill nothing.
-      this.#orphans.delete(id);
-      this.#persist();
+      this.#forget(id);
       return { id, outcome: "pid-reused", detail: `pid ${entry.pid} belongs to another process` };
     }
 
+    if (!force) {
+      try {
+        killByPid(entry.pid, false);
+      } catch (err: unknown) {
+        return { id, outcome: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+      if (await this.#waitUntilGone(entry, timing.graceMs)) {
+        this.#forget(id);
+        return { id, outcome: "killed" };
+      }
+      console.log(`[ledger] pid ${entry.pid} ignored SIGTERM; escalating to SIGKILL`);
+    }
+
     try {
-      killByPid(entry.pid, force);
+      killByPid(entry.pid, true);
     } catch (err: unknown) {
       return { id, outcome: "failed", detail: err instanceof Error ? err.message : String(err) };
     }
-    this.#orphans.delete(id);
-    this.#persist();
-    return { id, outcome: "killed" };
+    if (await this.#waitUntilGone(entry, timing.escalationMs)) {
+      this.#forget(id);
+      return { id, outcome: "killed" };
+    }
+
+    // Still there. Keep the entry: an orphan we failed to kill is exactly what this
+    // file is for, and forgetting it would make it untrackable.
+    console.error(`[ledger] pid ${entry.pid} survived SIGKILL; keeping its ledger entry`);
+    return { id, outcome: "failed", detail: `pid ${entry.pid} is still running after SIGKILL` };
   }
 
-  killOrphans(ids?: string[], force = false): OrphanKillResult[] {
+  /** Poll until the pid stops being the process we recorded, or the timeout expires. */
+  async #waitUntilGone(entry: LedgerEntry, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (processIdentity(entry.pid) !== entry.processStartTime) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  #forget(id: string): void {
+    this.#orphans.delete(id);
+    this.#persist();
+  }
+
+  async killOrphans(
+    ids?: string[],
+    force = false,
+    timing: KillTiming = DEFAULT_KILL_TIMING,
+  ): Promise<OrphanKillResult[]> {
     const targets = ids ?? [...this.#orphans.keys()];
-    return targets.map((id) => this.killOrphan(id, force));
+    return Promise.all(targets.map((id) => this.killOrphan(id, force, timing)));
   }
 
   #persist(): void {

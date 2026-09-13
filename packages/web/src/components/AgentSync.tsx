@@ -84,6 +84,13 @@ export function DriftReview({
         </header>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          {drift.timestampConflict && (
+            <p className="rounded border border-amber-900/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+              Two hosts carry the same timestamp but different agents. Last-write-wins cannot
+              choose between them, so syncing will discard one side. Check the diff below, and if
+              the losing side has something worth keeping, add it on the winning host first.
+            </p>
+          )}
           {drift.staleHostIds.map((hostId) => {
             const theirs = configs.get(hostId);
             if (!theirs) return null;

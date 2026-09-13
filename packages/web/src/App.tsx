@@ -201,6 +201,7 @@ export function App() {
               clientLabel={clientLabel}
               onBack={() => setSelected(null)}
               onEvicted={(reason) => setEvicted({ hostId: selectedEntry.id, reason })}
+              onTakeOver={() => void takeBack()}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">

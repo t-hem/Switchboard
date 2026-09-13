@@ -131,7 +131,7 @@ test("a recycled pid is dropped without being killed", () => {
   process.kill(pid, "SIGKILL");
 });
 
-test("killOrphan refuses a pid it cannot verify and kills nothing", () => {
+test("killOrphan refuses a pid it cannot verify and kills nothing", async () => {
   fs.rmSync(ledgerFile, { force: true });
   const pid = spawnSleeper();
   const ledger = SessionLedger.loadAndReconcile();
@@ -146,7 +146,7 @@ test("killOrphan refuses a pid it cannot verify and kills nothing", () => {
   writeLedger(tampered);
   const afterTamper = SessionLedger.loadAndReconcile();
 
-  assert.deepEqual(afterTamper.killOrphans(), []);
+  assert.deepEqual(await afterTamper.killOrphans(), []);
   assert.ok(alive(pid), "nothing should have been killed");
   process.kill(pid, "SIGKILL");
 });
@@ -157,7 +157,7 @@ test("killOrphan terminates a verified survivor", async () => {
   SessionLedger.loadAndReconcile().add({ id: "s6", pid, agent: "bash", cwd: dir, startedAt: Date.now() });
 
   const ledger = SessionLedger.loadAndReconcile();
-  const results = ledger.killOrphans(undefined, true);
+  const results = await ledger.killOrphans(undefined, true);
   assert.deepEqual(results, [{ id: "s6", outcome: "killed" }]);
 
   await reap(pid);
@@ -176,12 +176,61 @@ test("killOrphan reports a survivor that exited on its own", async () => {
   process.kill(pid, "SIGKILL");
   await reap(pid);
 
-  assert.deepEqual(ledger.killOrphans(), [{ id: "s7", outcome: "already-gone" }]);
+  assert.deepEqual(await ledger.killOrphans(), [{ id: "s7", outcome: "already-gone" }]);
   assert.deepEqual(ledger.orphans, []);
 });
 
-test("killing an unknown id is reported, not thrown", () => {
+test("killing an unknown id is reported, not thrown", async () => {
   fs.rmSync(ledgerFile, { force: true });
   const ledger = SessionLedger.loadAndReconcile();
-  assert.deepEqual(ledger.killOrphans(["nope"]), [{ id: "nope", outcome: "unknown-session" }]);
+  assert.deepEqual(await ledger.killOrphans(["nope"]), [{ id: "nope", outcome: "unknown-session" }]);
+});
+
+test("a process that traps SIGTERM is escalated to SIGKILL, not assumed dead", async () => {
+  fs.rmSync(ledgerFile, { force: true });
+  // Agent CLIs that trap signals to clean up are exactly the population that broke
+  // this: the kill was reported as succeeding while the process kept running.
+  const child = spawn("bash", ["--norc", "--noprofile", "-c", "trap '' TERM; sleep 30"], {
+    stdio: "ignore",
+    detached: true,
+  });
+  children.push(child);
+  await sleep(300);
+  const pid = child.pid!;
+  SessionLedger.loadAndReconcile().add({ id: "t1", pid, agent: "trapper", cwd: dir, startedAt: Date.now() });
+
+  const ledger = SessionLedger.loadAndReconcile();
+  const [result] = await ledger.killOrphans(undefined, false, { graceMs: 400, escalationMs: 2000 });
+
+  assert.equal(result?.outcome, "killed");
+  await reap(pid);
+  assert.ok(!alive(pid), "reporting killed must mean the process is actually gone");
+  assert.deepEqual(ledger.orphans, []);
+});
+
+test("an unkillable process is reported as failed and keeps its ledger entry", async () => {
+  fs.rmSync(ledgerFile, { force: true });
+  // A zombie is the one thing signals cannot clear: it still has a /proc entry with
+  // an unchanged start time, so it is indistinguishable from a survivor.
+  const parent = spawn("bash", ["--norc", "--noprofile", "-c", "sleep 0.2 & echo $!; sleep 30"], {
+    stdio: ["ignore", "pipe", "ignore"],
+    detached: true,
+  });
+  children.push(parent);
+  const zombiePid = Number(
+    (await new Promise<string>((resolve) => parent.stdout!.once("data", (d: Buffer) => resolve(d.toString())))).trim(),
+  );
+  await sleep(800); // let the child exit and become a zombie
+  assert.ok(alive(zombiePid), "test setup: the zombie should still be in the process table");
+
+  SessionLedger.loadAndReconcile().add({
+    id: "z1", pid: zombiePid, agent: "zombie", cwd: dir, startedAt: Date.now(),
+  });
+  const ledger = SessionLedger.loadAndReconcile();
+  const [result] = await ledger.killOrphans(undefined, false, { graceMs: 200, escalationMs: 200 });
+
+  assert.equal(result?.outcome, "failed");
+  assert.match(result?.detail ?? "", /still running/);
+  assert.equal(ledger.orphans.length, 1, "a kill that could not be confirmed must keep the entry");
+  assert.equal(readLedger().length, 1, "and must keep it on disk, or it becomes untrackable");
 });
