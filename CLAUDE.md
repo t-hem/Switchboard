@@ -1,5 +1,10 @@
 # Switchboard — notes for agents working on this repo
 
+**Before doing anything on a new machine, read [TESTING.md](./TESTING.md).** All
+phases are built, but only Linux has been exercised — Windows, the real fleet,
+`tailscale serve` and the phone are unverified, and that file is the ordered
+checklist of what is outstanding.
+
 `switchboard-spec.md` is the authoritative specification. Read it before changing
 anything. Its §2 "Non-goals" list is binding: do not add those features, do not add
 hooks or TODOs for them.
@@ -85,7 +90,7 @@ Both are the same shape: an API that is correct on POSIX and wrong on Windows.
 
 Before changing anything in the spawn or kill path, check what node-pty actually does
 on both platforms — `node_modules/node-pty/src/` is readable and worth reading.
-See the Windows checklist in README.md for what has yet to be verified on real hardware.
+See TESTING.md for what has yet to be verified on real hardware.
 
 ### Reporting a kill as successful requires observing the death
 

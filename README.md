@@ -25,6 +25,9 @@ See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 | 4 | Client lock / takeover | done |
 | 5 | Mobile polish, PWA, `tailscale serve` | done |
 
+"Done" means built and verified on Linux. See [TESTING.md](./TESTING.md) for what has
+not been exercised on real hardware yet.
+
 ## Requirements
 
 - **Node 22+.** `node-pty` is built from source on install, so a C++ toolchain is
@@ -270,39 +273,14 @@ against a soft keyboard is miserable for both.
 The service worker only ever caches this app's own origin. Host responses are never
 cached: a stale session list is worse than no session list.
 
-## Windows: what still needs testing
+## Status of testing
 
-Everything so far has been exercised on Linux. The Windows-specific paths are written
-to the spec and two real bugs in them were found by reading node-pty's source, but
-**none of it has been executed**. Work through this list on the first Windows box; it
-is ordered so the most likely blocker comes first.
+Everything so far was verified on **Linux only**, by suites that drive real daemons,
+real PTYs and a real browser. Windows, the real multi-machine fleet, `tailscale serve`
+and the phone are **not yet verified**.
 
-1. **`npm install` builds `node-pty`.** Needs Visual Studio Build Tools with the
-   "Desktop development with C++" workload. Nothing else works until this does.
-2. **Availability probe.** `curl http://localhost:7777/health` — an npm-installed
-   `claude` is `claude.cmd`, found via `PATHEXT`. It should report `available: true`.
-3. **Spawning a `.cmd` agent — the likely blocker.** `CreateProcess` cannot execute
-   batch files and node-pty passes the path straight to it, so `claude.cmd` is
-   launched through `cmd.exe /c` instead. If a session fails to start with
-   *"Unable to start terminal process: CreateProcess failed"*, that wrapper is the
-   code to look at (`sessions.ts`, the `win32` branch in `create`).
-   Claude Code's **native Windows installer** produces a real `claude.exe` and avoids
-   this path entirely — worth preferring if it gives trouble.
-4. **Killing a session actually kills it.** `DELETE /sessions/:id`, then check Task
-   Manager. node-pty throws on Windows if given a signal, so the daemon calls bare
-   `kill()` there; if that regressed, every kill silently does nothing.
-5. **Ctrl-C reaches the agent** through the `cmd.exe` layer — use the quick-send
-   button and confirm the agent interrupts rather than `cmd.exe` swallowing it.
-6. **Orphan recovery.** End the daemon from Task Manager (not Ctrl-C), restart it, and
-   confirm it reports survivors. Windows has no Job Object here, so orphans are more
-   likely than on Linux. Then *Kill all* and confirm the processes are really gone —
-   the result says `killed` only after the daemon observes them exit.
-7. **`processStartTime`.** Check `%USERPROFILE%\.switchboard\sessions.json` has a
-   `win32:<ticks>` value per entry. If it is missing, the PowerShell `StartTime`
-   probe failed and orphan killing will refuse to act, which is the safe direction
-   but means cleanup never works.
-8. **Drive-letter paths.** Start a session in `C:\dev\somerepo` and confirm
-   `workspaceRoots` with backslashes populates the directory picker.
+**→ [TESTING.md](./TESTING.md)** is the checklist, ordered so the most likely blocker
+comes first. Start there before trusting any of this on a new machine.
 
 ## Running the daemon from a clean shell
 
