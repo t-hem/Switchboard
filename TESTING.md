@@ -141,8 +141,8 @@ Setup instructions are in the README. Untested on your tailnet.
 ## 4. The phone
 
 **First real handset run, 2026-09-15.** A live Claude Code session, driven from the
-phone, found two bugs that the emulated viewport in `mobile.mjs` could not — both since
-fixed, neither re-verified on the handset yet.
+phone, found three bugs that the emulated viewport in `mobile.mjs` could not. Two are
+fixed but not re-verified on the handset; the third is open.
 
 - **Send composed the line but never submitted it.** `MobileInputBar` sent
   `` `${line}\r` `` as one frame, so it reached the pty as a single read. A TUI that
@@ -155,14 +155,38 @@ fixed, neither re-verified on the handset yet.
   be changed at all — the prompt could only be escaped. All three keys are now in the
   row, and `mobile.mjs` asserts they are present.
 
-A third finding is **not** treated as a bug: typing directly into the terminal on a
+**Scrolling has no momentum, and that is a real bug — not yet fixed.** A drag moves the
+scrollback one-to-one and stops dead; there is no fling, and no acceleration on a faster
+drag. Scrolled up while output is streaming, there is no practical way back down to the
+live view.
+
+The cause is in xterm, confirmed by reading `node_modules/@xterm/xterm/lib/xterm.js`
+(5.5.0). `Viewport.handleTouchMove` sets `scrollTop += delta` by hand, and the
+`touchmove` listener is registered `{passive: false}` and calls `preventDefault()`
+whenever that handler does not bubble — which is everywhere except the very top and
+bottom of the buffer. So the browser's own touch scrolling, momentum included, is
+replaced by a 1:1 drag. There is no xterm option to turn this off.
+
+Two things worth knowing before attempting it:
+
+- The viewport also registers a plain `scroll` listener (`Viewport._handleScroll`) that
+  syncs the buffer from `scrollTop`. Native scrolling therefore already drives xterm
+  correctly — it is only the touch handler that pre-empts it. Stopping touch events at
+  `.xterm-viewport` before they reach xterm's listener on the ancestor element should
+  hand scrolling back to the browser and restore momentum.
+- That is unverified and cannot be verified from Linux. A "jump to latest" affordance
+  is the cheaper fix for the actual pain and does not depend on any of it.
+
+One further finding is **not** treated as a bug: typing directly into the terminal on a
 phone produces jumbled input. The soft keyboard drives xterm's hidden textarea through
 IME composition, and autocorrect rewrites characters already sent to the pty. The input
 bar exists because that path does not work. If it is ever worth addressing, the fix is
 to focus the input bar when the terminal is tapped, not to repair raw typing.
 
-- [ ] **Re-verify both fixes on the handset** — compose a line, tap Send once, and see
-      it submit; then answer a multi-select prompt using the quick keys alone.
+- [ ] **Re-verify the two fixes on the handset** — compose a line, tap Send once, and
+      see it submit; then answer a multi-select prompt using the quick keys alone.
+- [ ] **Scrolling**, once it is fixed — fling the scrollback, confirm momentum, and
+      confirm getting back to the live view is one gesture.
 - [ ] **Installs to the home screen** from the HTTPS origin and launches standalone.
 - [ ] **The couch test** (spec §1, the one-line test of success): from the phone,
       see that a Claude Code session on the Windows desktop is blocked on a permission
