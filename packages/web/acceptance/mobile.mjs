@@ -126,7 +126,8 @@ console.log("\n=== the permission prompt, answered with quick-send buttons only 
 ok("prompt is on screen", await waitTerm("Do you want to proceed?"), (await term()).slice(-200));
 await page.screenshot({ path: `${OUT}/mobile-prompt.png` });
 ok("quick keys are present", await page.$$eval("button", (els) =>
-  ["Send y", "Send n", "Escape", "Ctrl-C (interrupt)", "Up arrow", "Enter"]
+  ["Send y", "Send n", "Escape", "Ctrl-C (interrupt)", "Up arrow", "Down arrow",
+   "Space (toggle)", "Tab", "Enter"]
     .every((a) => els.some((e) => e.getAttribute("aria-label") === a))));
 ok("tapped y", await tapKey("Send y"));
 ok("the agent received y", await waitTerm("ANSWERED:y"), (await term()).slice(-200));
@@ -159,6 +160,8 @@ console.log("\n=== quick keys send the exact bytes ===");
   ok("Esc sends 0x1b", await waitTerm("^["), (await term()).slice(-80));
   await tapKey("Up arrow");
   ok("↑ sends the CSI A sequence", await waitTerm("^[[A"), (await term()).slice(-80));
+  await tapKey("Down arrow");
+  ok("↓ sends the CSI B sequence", await waitTerm("^[[B"), (await term()).slice(-80));
   await api(`/sessions/${raw.id}`, { method: "DELETE" });
 }
 

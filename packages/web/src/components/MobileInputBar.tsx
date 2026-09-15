@@ -4,6 +4,11 @@ import { useRef, useState } from "react";
  * Quick keys for the interactions that dominate phone use: answering a permission
  * prompt and moving through a menu. Each button sends exactly the one key it names,
  * so `y` does not commit on its own — confirming still takes a deliberate Enter.
+ *
+ * Both arrows, Space and Tab are here because a multi-select prompt needs all four:
+ * arrows move the cursor, Space toggles the option under it, Tab moves between
+ * questions, Enter commits. With only Up and Enter the checkboxes cannot be
+ * toggled at all, and the prompt is a dead end on a phone.
  */
 const QUICK_KEYS: { label: string; data: string; title: string }[] = [
   { label: "y", data: "y", title: "Send y" },
@@ -11,6 +16,9 @@ const QUICK_KEYS: { label: string; data: string; title: string }[] = [
   { label: "Esc", data: "\x1b", title: "Escape" },
   { label: "^C", data: "\x03", title: "Ctrl-C (interrupt)" },
   { label: "↑", data: "\x1b[A", title: "Up arrow" },
+  { label: "↓", data: "\x1b[B", title: "Down arrow" },
+  { label: "␣", data: " ", title: "Space (toggle)" },
+  { label: "⇥", data: "\t", title: "Tab" },
   { label: "⏎", data: "\r", title: "Enter" },
 ];
 
@@ -25,10 +33,25 @@ export function MobileInputBar({ send, disabled }: { send: (data: string) => voi
   const [value, setValue] = useState("");
   const input = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * The line and its carriage return go as two separate writes, a frame apart.
+   *
+   * Sending `line\r` as one chunk looks like a paste to a TUI that reads stdin in
+   * bursts — Ink-based prompts (Claude Code's composer among them) treat a
+   * multi-character read as pasted text and insert the CR as a newline instead of
+   * submitting. The line lands in the composer and just sits there. Delivering the
+   * Enter on its own read is what makes it register as a keypress.
+   */
   const submit = (): void => {
     if (disabled) return;
-    send(`${value}\r`);
+    const line = value;
     setValue("");
+    if (line) {
+      send(line);
+      setTimeout(() => send("\r"), 20);
+    } else {
+      send("\r");
+    }
     // Keep focus so the keyboard stays up for the next line.
     input.current?.focus();
   };
