@@ -305,12 +305,55 @@ session's variables into every agent it spawns — a real example seen during te
 
 Anything that needs adjusting per machine belongs in `host.json`'s `env` block.
 
+### Running it as a service instead
+
+Better than remembering: have the init system start it, so it comes up at boot with a
+clean environment every time and nothing has to be launched by hand. On Linux that is a
+**systemd user service**; on Windows, a startup `.bat`.
+
+```bash
+systemctl --user status switchboard     # is it up
+systemctl --user restart switchboard    # after a git pull
+journalctl --user -u switchboard -f     # follow the logs
+```
+
+The unit files are **deliberately not in this repo** — they are machine-local, like
+`host.json`. Paths, Node version and notification mechanism differ per machine, and a
+committed unit would be wrong on every other one. Three things are worth copying
+whenever you set this up on a new Linux box:
+
+- **Run the built output, not `npm run dev:host`.** `dev:host` is `tsx watch`, which
+  restarts on source changes — on a long-running daemon that kills every live PTY
+  session the moment a file is edited. Build first (about a second), then run
+  `packages/host/dist/index.js`, so a `git pull` also cannot leave it quietly serving
+  stale JavaScript.
+- **`exec` the daemon** from any wrapper script, so the init system supervises `node`
+  itself. Otherwise SIGTERM reaches the wrapper and the daemon's shutdown — which
+  signals each PTY and *awaits* termination — never runs.
+- **`KillMode=mixed`.** systemd's default signals the whole cgroup, which kills the
+  agent processes out from under the daemon and strands their ledger entries. Only the
+  daemon should get the signal; it cleans up its own children.
+
+Starting it through systemd is also what lets an agent session restart the daemon
+without contaminating it: systemd is the parent, so none of the calling session's
+variables are inherited.
+
+Pair it with an `OnFailure=` unit that writes the journal tail somewhere findable and
+raises a desktop notification. A daemon that is simply absent shows up in the client as
+a host that is offline, with no reason given.
+
 ## Testing
 
 ```bash
-npm test          # ring buffer + the ledger's PID-reuse guard (node:test)
+npm test          # node:test — 64 cases
 npm run typecheck
 ```
+
+`npm test` covers the places with real logic to pin: the scrollback ring buffer, the
+claim state machine, the ledger's PID-reuse guard, the per-platform process ops, and
+the kill escalation. The last two matter disproportionately, because the Windows code
+paths cannot be executed by a Linux machine — they run against plain objects and a fake
+`ProcessOps`, so both platforms are exercised from either OS.
 
 Everything else is verified by acceptance harnesses that drive real software rather
 than mocks:
