@@ -171,9 +171,10 @@ since **2026-09-15** that no handset has touched.
   be changed at all — the prompt could only be escaped. All three keys are now in the
   row, and `mobile.mjs` asserts they are present.
 
-**Scrolling had no momentum. Three changes now address it; none is handset-verified.**
-A drag moved the scrollback one-to-one and stopped dead — no fling, no acceleration —
-and scrolled up while output streamed there was no practical way back to the live view.
+**Scrolling had no momentum. Three changes fixed it, confirmed on the handset on
+2026-09-15 — "infinitely better".** A drag moved the scrollback one-to-one and stopped
+dead — no fling, no acceleration — and scrolled up while output streamed there was no
+practical way back to the live view.
 
 The cause is in xterm, confirmed by reading `node_modules/@xterm/xterm/lib/xterm.js`
 (5.5.0). `Viewport.handleTouchMove` sets `scrollTop += delta` by hand, and the
@@ -203,8 +204,7 @@ native scroll never starts. What shipped instead:
 
 A **↓ Latest** button appears whenever the viewport is scrolled off the bottom and
 withdraws once it is back. `mobile.mjs` asserts the button's appear/tap/withdraw cycle,
-that the thumb is grabbable and that dragging it scrolls — but momentum itself cannot
-be tested from Linux, so only a handset can close this out.
+that the thumb is grabbable and that dragging it scrolls.
 
 One further finding is **not** treated as a bug: typing directly into the terminal on a
 phone produces jumbled input. The soft keyboard drives xterm's hidden textarea through
@@ -220,13 +220,15 @@ to focus the input bar when the terminal is tapped, not to repair raw typing.
       handset, 2026-09-15.** A four-option checkbox prompt from Claude Code itself was
       answered from the phone with several options ticked, which takes `↓` to move and
       Space to toggle. The dead end the first run hit is gone.
-- [ ] **Scrolling — the whole of the fix above is unverified on a handset.** Fling the
-      scrollback and confirm it carries rather than stopping dead; confirm a faster
-      drag goes further. Then scroll up and confirm **↓ Latest** appears and returns
-      you to the live view in one tap.
+- [x] **Scrolling — fixed and confirmed on the handset, 2026-09-15.** The fling
+      carries instead of stopping dead. Handing touch scrolling back to the browser
+      works; the 1:1 drag is gone.
+- [ ] **↓ Latest.** Scroll up while output is streaming and confirm the button appears
+      and returns you to the live view in one tap. Not separately reported on yet.
 - [ ] **The drag thumb.** Confirm it is visible whenever there is scrollback, that a
-      thumb can actually grab it, and that it is not so intrusive over the right-hand
-      column of the terminal that it should be hidden until first touch.
+      thumb can actually grab it, and — now that momentum works and it is no longer
+      needed as the primary way to scroll — whether it is intrusive enough over the
+      terminal's right-hand column to be worth fading in on first touch instead.
 - [ ] **Installs to the home screen** from the HTTPS origin and launches standalone.
 - [ ] **The couch test** (spec §1, the one-line test of success): from the phone,
       see that a Claude Code session on the Windows desktop is blocked on a permission
