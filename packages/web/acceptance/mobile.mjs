@@ -30,6 +30,22 @@ await page.evaluateOnNewDocument((hostUrl, token) => {
   }
 }, HOST_URL, TOKEN);
 
+// Record every input frame the client sends, so the two-write submit can be asserted
+// on directly rather than inferred from what the agent happened to do with it.
+await page.evaluateOnNewDocument(() => {
+  window.__inputFrames = [];
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    try {
+      const msg = JSON.parse(data);
+      if (msg && msg.type === "input") window.__inputFrames.push({ data: msg.data, at: performance.now() });
+    } catch {
+      /* not one of ours */
+    }
+    return send.call(this, data);
+  };
+});
+
 const text = () => page.evaluate(() => document.body.innerText);
 const term = () => page.evaluate(() => document.querySelector(".xterm-rows")?.innerText ?? "");
 const waitTerm = async (needle, ms = 20000) => {
@@ -142,6 +158,20 @@ await sendBtn.asElement().click();
 ok("the line arrived with a trailing return", await waitTerm("LINE:hello from the couch"), (await term()).slice(-200));
 ok("the field cleared after sending",
    await page.$eval('input[aria-label="Line input"]', (el) => el.value) === "");
+{
+  // The bug this guards: `line\r` in one write reaches the pty as a single read, and
+  // an Ink prompt treats a multi-character read as a paste — the line lands in the
+  // composer and never submits. The Enter has to arrive as its own read, which means
+  // its own frame, held back until the agent has shown it read the line.
+  const frames = await page.evaluate(() => window.__inputFrames.slice(-2));
+  ok("the line and its Enter went as two separate frames",
+     frames.length === 2 && frames[0].data === "hello from the couch" && frames[1].data === "\r",
+     JSON.stringify(frames.map((f) => f.data)));
+  ok("the Enter was held back from the line",
+     frames[1].at - frames[0].at >= 40, `${Math.round(frames[1].at - frames[0].at)}ms`);
+  ok("and not held back longer than a person would notice",
+     frames[1].at - frames[0].at <= 400, `${Math.round(frames[1].at - frames[0].at)}ms`);
+}
 
 console.log("\n=== quick keys send the exact bytes ===");
 {

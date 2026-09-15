@@ -92,7 +92,7 @@ export function TerminalView({
 
       {/* Phone only: on a desktop the real keyboard is already the better input. */}
       <div className="md:hidden">
-        <MobileInputBar send={term.send} disabled={term.state !== "connected"} />
+        <MobileInputBar send={term.send} sendLine={term.sendLine} disabled={term.state !== "connected"} />
       </div>
     </div>
   );

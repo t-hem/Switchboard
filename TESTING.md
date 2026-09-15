@@ -164,8 +164,18 @@ since **2026-09-15** that no handset has touched.
   `` `${line}\r` `` as one frame, so it reached the pty as a single read. A TUI that
   reads stdin in bursts treats a multi-character read as *pasted* text and inserts the
   CR as a newline rather than submitting — the line landed in Claude Code's composer
-  and sat there until a separate Enter was tapped. The line and its return now go as
-  two writes a frame apart.
+  and sat there until a separate Enter was tapped.
+
+  **The first fix was racy and came back.** Sending the Enter on a fixed 20ms timer
+  survived a whole handset session and then failed again the same day: the two writes
+  only land in separate reads if the agent is scheduled in between, and a busy agent
+  — mid-render, mid-turn — takes both out of the pty buffer at once. No delay can fix
+  that, only make it rarer. `sendLine` in `useTerminal.ts` now waits for *evidence*
+  instead: the agent producing output is proof it read the line, since that output is
+  its redraw. A 40ms floor stops output already in flight from counting, and a 250ms
+  cap covers an agent that redraws nothing. `mobile.mjs` asserts the two frames and
+  the gap by wrapping `WebSocket.prototype.send`, so the client half is pinned from
+  Linux — but whether it holds against a *busy* Claude Code is a handset question.
 - **A multi-select prompt was a dead end.** The quick-key row had `↑` and `⏎` but no
   `↓`, no Space and no Tab. Space is what toggles a checkbox, so the options could not
   be changed at all — the prompt could only be escaped. All three keys are now in the
@@ -212,10 +222,12 @@ IME composition, and autocorrect rewrites characters already sent to the pty. Th
 bar exists because that path does not work. If it is ever worth addressing, the fix is
 to focus the input bar when the terminal is tapped, not to repair raw typing.
 
-- [x] **Send submits in one tap — re-verified on the handset, 2026-09-15.** An entire
-      working session was driven from the phone through the input bar, every line
-      submitting on a single Send. The two-writes-a-frame-apart fix holds against a
-      real soft keyboard.
+- [ ] **Send submits in one tap — regressed, re-fixed, unverified.** The 20ms-timer
+      version survived a whole session on 2026-09-15 and then pasted instead of
+      submitting, which is what exposed it as a race rather than a fix. The
+      output-driven version that replaced it has not been near a handset. Use it
+      hard, especially while the agent is mid-turn and busy — that is the case that
+      broke the old one.
 - [x] **Answer a multi-select prompt using the quick keys alone — re-verified on the
       handset, 2026-09-15.** A four-option checkbox prompt from Claude Code itself was
       answered from the phone with several options ticked, which takes `↓` to move and

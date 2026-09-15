@@ -16,6 +16,12 @@ export type ConnectionState =
   | "gone";
 
 const RESIZE_DEBOUNCE_MS = 150;
+/**
+ * A line's Enter is held back at least this long, and at most this long, after the
+ * line itself — see `sendLine`.
+ */
+const ENTER_MIN_GAP_MS = 40;
+const ENTER_MAX_WAIT_MS = 250;
 const BACKOFF_START_MS = 500;
 const BACKOFF_MAX_MS = 30_000;
 
@@ -26,6 +32,9 @@ export type TerminalHandle = {
   lockedBy: string | null;
   /** Send text to the pty — used by the mobile line-input bar and quick keys. */
   send: (data: string) => void;
+  /** Send a composed line and submit it. See the implementation for why it is not
+   *  simply `send(line + "\r")`. */
+  sendLine: (line: string) => void;
   reconnect: () => void;
   /** False while the viewport is scrolled up, so the live view can be offered back. */
   atBottom: boolean;
@@ -83,12 +92,55 @@ export function useTerminal({
   const onEvictedRef = useRef(onEvicted);
   onEvictedRef.current = onEvicted;
 
+  // Callbacks waiting for the next output frame. Only `sendLine` uses this, to learn
+  // that the agent has actually read what it was sent.
+  const outputWaitersRef = useRef<(() => void)[]>([]);
+
   const send = useCallback((data: string) => {
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "input", data }));
     }
   }, []);
+
+  /**
+   * Send a composed line, then submit it.
+   *
+   * `send(line + "\r")` does not work: it reaches the pty as one read, and a TUI that
+   * reads stdin in bursts — Ink-based prompts, Claude Code's composer among them —
+   * treats a multi-character read as *pasted* text and inserts the CR as a newline
+   * instead of submitting. The line lands in the composer and sits there.
+   *
+   * Sending the Enter on a fixed 20ms timer was the first fix, and it is racy: the
+   * two writes only land in separate reads if the agent happens to be scheduled in
+   * between. A busy agent — mid-render, mid-turn — reads both out of the pty buffer
+   * at once, and the paste is back. It survived a whole session and then failed.
+   *
+   * So rather than guess, wait for evidence: the agent producing output is proof it
+   * has read what it was sent, since that output *is* its redraw. The floor stops
+   * output that was already in flight from being mistaken for that redraw, and the
+   * cap covers an agent that redraws nothing at all.
+   */
+  const sendLine = useCallback(
+    (line: string) => {
+      if (!line) {
+        send("\r");
+        return;
+      }
+      send(line);
+      let fired = false;
+      const fire = (): void => {
+        if (fired) return;
+        fired = true;
+        send("\r");
+      };
+      window.setTimeout(() => {
+        if (!fired) outputWaitersRef.current.push(fire);
+      }, ENTER_MIN_GAP_MS);
+      window.setTimeout(fire, ENTER_MAX_WAIT_MS);
+    },
+    [send],
+  );
 
   const scrollToBottom = useCallback(() => {
     termRef.current?.scrollToBottom();
@@ -228,6 +280,13 @@ export function useTerminal({
           return;
         }
         term.write(new Uint8Array(event.data));
+        // Output means the agent has read what it was last sent — which is what a
+        // pending Enter is waiting for.
+        const waiters = outputWaitersRef.current;
+        if (waiters.length > 0) {
+          outputWaitersRef.current = [];
+          for (const waiter of waiters) waiter();
+        }
       };
 
       socket.onclose = (event) => {
@@ -265,6 +324,7 @@ export function useTerminal({
 
     return () => {
       closedRef.current = true;
+      outputWaitersRef.current = [];
       if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       observer.disconnect();
@@ -282,5 +342,5 @@ export function useTerminal({
     };
   }, [entry, sessionId, container, clientId, clientLabel, reconnectNonce]);
 
-  return { state, exitCode, evictedBy, lockedBy, send, reconnect, atBottom, scrollToBottom, viewport };
+  return { state, exitCode, evictedBy, lockedBy, send, sendLine, reconnect, atBottom, scrollToBottom, viewport };
 }

@@ -29,29 +29,26 @@ const QUICK_KEYS: { label: string; data: string; title: string }[] = [
  * and a keyboard that fights the viewport. This bar is how the phone case actually
  * works: compose a whole line, then send it with a trailing carriage return.
  */
-export function MobileInputBar({ send, disabled }: { send: (data: string) => void; disabled: boolean }) {
+export function MobileInputBar({
+  send,
+  sendLine,
+  disabled,
+}: {
+  send: (data: string) => void;
+  sendLine: (line: string) => void;
+  disabled: boolean;
+}) {
   const [value, setValue] = useState("");
   const input = useRef<HTMLInputElement | null>(null);
 
-  /**
-   * The line and its carriage return go as two separate writes, a frame apart.
-   *
-   * Sending `line\r` as one chunk looks like a paste to a TUI that reads stdin in
-   * bursts — Ink-based prompts (Claude Code's composer among them) treat a
-   * multi-character read as pasted text and insert the CR as a newline instead of
-   * submitting. The line lands in the composer and just sits there. Delivering the
-   * Enter on its own read is what makes it register as a keypress.
-   */
+  // The line and its carriage return have to reach the pty as two separate reads, or
+  // the agent treats them as pasted text and never submits. `sendLine` in
+  // useTerminal.ts owns that, because getting it right needs to see inbound output.
   const submit = (): void => {
     if (disabled) return;
     const line = value;
     setValue("");
-    if (line) {
-      send(line);
-      setTimeout(() => send("\r"), 20);
-    } else {
-      send("\r");
-    }
+    sendLine(line);
     // Keep focus so the keyboard stays up for the next line.
     input.current?.focus();
   };
