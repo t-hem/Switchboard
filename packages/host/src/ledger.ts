@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { configDir } from "./config.js";
-import { identityMatches, killByPid, processIdentity, type ProcessIdentity } from "./proc.js";
+import { identityMatches, platform, type ProcessIdentity, type ProcessOps } from "./platform/index.js";
 
 export const LEDGER_FILE = "sessions.json";
 
@@ -52,13 +52,21 @@ function isEntry(v: unknown): v is LedgerEntry {
  */
 export class SessionLedger {
   readonly #file: string;
+  /**
+   * Injected rather than imported so the escalation below can be driven against a
+   * fake — one that ignores the first kill, reports a changed identity mid-poll, or
+   * throws the way node-pty does on Windows. Those are the cases this code exists to
+   * handle and none of them can be staged with real processes on one OS.
+   */
+  readonly #ops: ProcessOps;
   /** Sessions this daemon currently owns. */
   readonly #live = new Map<string, LedgerEntry>();
   /** Survivors of a previous daemon run, still running and unowned. */
   readonly #orphans = new Map<string, LedgerEntry>();
 
-  private constructor(file: string) {
+  private constructor(file: string, ops: ProcessOps) {
     this.#file = file;
+    this.#ops = ops;
   }
 
   /**
@@ -66,10 +74,10 @@ export class SessionLedger {
    * genuinely still the processes we spawned. Entries that are dead — or whose pid
    * has been recycled by something else — are dropped without being touched.
    */
-  static loadAndReconcile(): SessionLedger {
+  static loadAndReconcile(ops: ProcessOps = platform): SessionLedger {
     const dir = configDir();
     fs.mkdirSync(dir, { recursive: true });
-    const ledger = new SessionLedger(path.join(dir, LEDGER_FILE));
+    const ledger = new SessionLedger(path.join(dir, LEDGER_FILE), ops);
 
     let parsed: unknown;
     try {
@@ -81,7 +89,7 @@ export class SessionLedger {
 
     for (const raw of parsed) {
       if (!isEntry(raw)) continue;
-      if (identityMatches(raw.pid, raw.processStartTime)) ledger.#orphans.set(raw.id, raw);
+      if (identityMatches(ops, raw.pid, raw.processStartTime)) ledger.#orphans.set(raw.id, raw);
     }
     ledger.#persist();
     return ledger;
@@ -93,7 +101,7 @@ export class SessionLedger {
 
   /** Record a freshly spawned pty. Returns the entry actually stored. */
   add(entry: Omit<LedgerEntry, "processStartTime">): LedgerEntry | null {
-    const identity = processIdentity(entry.pid);
+    const identity = this.#ops.processIdentity(entry.pid);
     // No identity means no safe way to verify this pid later, so recording it would
     // create an entry we could never act on. Better to leave it out.
     if (identity === null) return null;
@@ -127,7 +135,7 @@ export class SessionLedger {
     const entry = this.#orphans.get(id);
     if (!entry) return { id, outcome: "unknown-session" };
 
-    const current = processIdentity(entry.pid);
+    const current = this.#ops.processIdentity(entry.pid);
     if (current === null) {
       this.#forget(id);
       return { id, outcome: "already-gone" };
@@ -140,7 +148,7 @@ export class SessionLedger {
 
     if (!force) {
       try {
-        killByPid(entry.pid, false);
+        this.#ops.killByPid(entry.pid, false);
       } catch (err: unknown) {
         return { id, outcome: "failed", detail: err instanceof Error ? err.message : String(err) };
       }
@@ -152,7 +160,7 @@ export class SessionLedger {
     }
 
     try {
-      killByPid(entry.pid, true);
+      this.#ops.killByPid(entry.pid, true);
     } catch (err: unknown) {
       return { id, outcome: "failed", detail: err instanceof Error ? err.message : String(err) };
     }
@@ -171,7 +179,7 @@ export class SessionLedger {
   async #waitUntilGone(entry: LedgerEntry, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      if (processIdentity(entry.pid) !== entry.processStartTime) return true;
+      if (this.#ops.processIdentity(entry.pid) !== entry.processStartTime) return true;
       if (Date.now() >= deadline) return false;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }

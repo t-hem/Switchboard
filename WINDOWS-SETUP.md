@@ -178,25 +178,31 @@ Four Windows bugs are known, all the same shape: an API correct on POSIX and wro
 Windows. Two were found by reading node-pty's source, two by the first real Windows
 run. `node_modules/node-pty/` is readable and worth reading before you theorise.
 
-The platform-divergent pty behaviour now lives in `packages/host/src/ptyplatform.ts`,
-one object per platform, so a Windows change cannot alter the POSIX path.
-`packages/host/test/ptyplatform.test.ts` drives **both** objects and runs on any OS —
-add a case there for anything new you find, so the Linux box can catch a Windows
-regression it cannot otherwise reach.
+Platform-divergent process lifecycle lives in `packages/host/src/platform/` —
+`win32.ts`, `posix.ts`, one `ProcessOps` interface, chosen once at load. If a Windows
+quirk needs a home, that is the file. A Windows change cannot alter the POSIX path.
+
+Both objects are plain values, so both are driven by `test/platform.test.ts` on any OS,
+and `test/escalation.test.ts` drives the kill escalation against fakes that ignore a
+kill or throw the way node-pty does. Add a case there for anything new you find — it is
+how the Linux box catches a Windows regression it cannot otherwise reach.
 
 - **"Unable to start terminal process: CreateProcess failed"** on spawn —
   `CreateProcess` cannot execute `.cmd`/`.bat` and node-pty passes the path straight
-  to it. `windowsPty.spawnCommand` runs those through `cmd.exe /c`.
+  to it. `win32Ops.spawnCommand` runs those through `cmd.exe /c`.
 - **No output reaches any client, while the daemon looks healthy** — the ConPTY agent
   calls `setEncoding("utf8")` on the conout socket unconditionally, so `encoding: null`
   is ignored and `onData` delivers **strings**, not Buffers. Every chunk then threw
   `chunk.copy is not a function` inside the ring buffer before any subscriber ran.
-  `ptyChunkToBytes` normalises it. If you see an attached WebSocket receive zero frames
-  while `/health` is fine, this is the shape.
+  `ptybytes.ts#ptyChunkToBytes` normalises it. If you see an attached WebSocket receive
+  zero frames while `/health` is fine, this is the shape. Note the residual limit: bytes
+  that are not valid UTF-8 were already replaced with U+FFFD inside node-pty, so a child
+  writing in the console's OEM codepage can still show mojibake. Not fixable at our
+  layer.
 - **Kills answer 204 but nothing dies** — node-pty *throws* on Windows if given a
   signal, and its bare `kill()` only kills the pids ConPTY reports attached to the
   console, in a promise it never awaits. The `cmd.exe -> node.exe -> agent.exe` tree
-  outlives it: three killed sessions left nine live processes. `windowsPty.kill` takes
+  outlives it: three killed sessions left nine live processes. `win32Ops.killPty` takes
   the tree down with `taskkill /T` first, then releases the pty handle.
 - **`sessions.json` missing `processStartTime`** — the PowerShell
   `(Get-Process -Id X).StartTime.Ticks` probe failed. Orphan killing then refuses to

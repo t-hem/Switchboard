@@ -6,7 +6,7 @@ import path from "node:path";
 import test, { after, before } from "node:test";
 
 import { LEDGER_FILE, SessionLedger } from "../src/ledger.ts";
-import { processIdentity } from "../src/proc.ts";
+import { platform } from "../src/platform/index.ts";
 
 // Real processes, no mocking: the whole point of the guard is that it reads the
 // operating system's idea of when a pid was created.
@@ -87,7 +87,7 @@ test("add records the pid's creation time and remove clears it", () => {
 
   const entry = ledger.add({ id: "s1", pid, agent: "bash", cwd: dir, startedAt: Date.now() });
   assert.ok(entry);
-  assert.equal(entry.processStartTime, processIdentity(pid));
+  assert.equal(entry.processStartTime, platform.processIdentity(pid));
   assert.equal(readLedger().length, 1);
 
   ledger.remove("s1");

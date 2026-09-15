@@ -6,7 +6,8 @@ import * as pty from "node-pty";
 
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
-import { ptyChunkToBytes, ptyPlatform } from "./ptyplatform.js";
+import { platform } from "./platform/index.js";
+import { ptyChunkToBytes } from "./ptybytes.js";
 import { RingBuffer } from "./ringbuffer.js";
 import type { HostConfig, Session } from "./types.js";
 
@@ -104,8 +105,8 @@ export class SessionManager {
     const rows = clampDimension(opts.rows, DEFAULT_ROWS);
 
     // How an executable is actually launched is platform business — on Windows a .cmd
-    // shim has to go through the command interpreter. See ptyplatform.ts.
-    const { file, args } = ptyPlatform.spawnCommand(executable, [
+    // shim has to go through the command interpreter. See platform/win32.ts.
+    const { file, args } = platform.spawnCommand(executable, [
       ...resolvedAgent.args,
       ...(opts.extraArgs ?? []),
     ]);
@@ -271,12 +272,12 @@ export class SessionManager {
 
   /**
    * Ask a pty to die, in the way the platform actually supports — which differs
-   * enough between Windows and POSIX that it lives in ptyplatform.ts. `force` is the
+   * enough between Windows and POSIX that it lives in platform/. `force` is the
    * escalation step, reached after the grace period when the first attempt did not
    * take.
    */
   #signal(runtime: SessionRuntime, force: boolean): void {
-    ptyPlatform.kill(runtime.pty, runtime.session.pid, force);
+    platform.killPty(runtime.pty, runtime.session.pid, force);
   }
 
   #waitForExit(runtime: SessionRuntime, ms: number): Promise<boolean> {

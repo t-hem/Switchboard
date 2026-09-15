@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { posixPty, ptyChunkToBytes, windowsPty } from "../src/ptyplatform.ts";
+import { posixOps, win32Ops } from "../src/platform/index.ts";
+import { ptyChunkToBytes } from "../src/ptybytes.ts";
 
 // The reason this file exists: the Windows pty path cannot run on the machine that
 // reviews it, so every Windows bug so far was found by reading node-pty's source
@@ -21,25 +22,25 @@ function stubPty(): { calls: KillCall[]; kill: (signal?: string) => void } {
 }
 
 test("windows sends a .cmd shim through the command interpreter", () => {
-  const { file, args } = windowsPty.spawnCommand("C:\\npm\\claude.cmd", ["--help"]);
+  const { file, args } = win32Ops.spawnCommand("C:\\npm\\claude.cmd", ["--help"]);
   assert.match(file, /cmd\.exe$/i);
   assert.deepEqual(args, ["/c", "C:\\npm\\claude.cmd", "--help"]);
 });
 
 test("windows shims .bat too, and is case-insensitive about the extension", () => {
-  assert.deepEqual(windowsPty.spawnCommand("x.BAT", []).args, ["/c", "x.BAT"]);
-  assert.deepEqual(windowsPty.spawnCommand("x.Cmd", []).args, ["/c", "x.Cmd"]);
+  assert.deepEqual(win32Ops.spawnCommand("x.BAT", []).args, ["/c", "x.BAT"]);
+  assert.deepEqual(win32Ops.spawnCommand("x.Cmd", []).args, ["/c", "x.Cmd"]);
 });
 
 test("windows runs a real executable directly, with no interpreter", () => {
-  const { file, args } = windowsPty.spawnCommand("C:\\Program Files\\claude.exe", ["-v"]);
+  const { file, args } = win32Ops.spawnCommand("C:\\Program Files\\claude.exe", ["-v"]);
   assert.equal(file, "C:\\Program Files\\claude.exe");
   assert.deepEqual(args, ["-v"]);
 });
 
 test("posix never rewrites the command, even for a file named .cmd", () => {
   // A POSIX file may legitimately be called anything; there is no interpreter to add.
-  const { file, args } = posixPty.spawnCommand("/usr/local/bin/weird.cmd", ["-x"]);
+  const { file, args } = posixOps.spawnCommand("/usr/local/bin/weird.cmd", ["-x"]);
   assert.equal(file, "/usr/local/bin/weird.cmd");
   assert.deepEqual(args, ["-x"]);
 });
@@ -47,8 +48,8 @@ test("posix never rewrites the command, even for a file named .cmd", () => {
 test("posix names the signal explicitly rather than defaulting to SIGHUP", () => {
   // node-pty's kill() defaults to SIGHUP, which agent CLIs may legitimately ignore.
   const pty = stubPty();
-  posixPty.kill(pty, 1234, false);
-  posixPty.kill(pty, 1234, true);
+  posixOps.killPty(pty, 1234, false);
+  posixOps.killPty(pty, 1234, true);
   assert.deepEqual(pty.calls, [{ signal: "SIGTERM" }, { signal: "SIGKILL" }]);
 });
 
@@ -58,13 +59,13 @@ test("windows never passes a signal to node-pty", () => {
   const pty = stubPty();
   // pid 0 is never a real process, and taskkill does not exist off Windows: both
   // failure modes are swallowed, which is what keeps the escalation running.
-  windowsPty.kill(pty, 0, false);
+  win32Ops.killPty(pty, 0, false);
   assert.deepEqual(pty.calls, [{}], "expected a bare kill() with no signal");
 });
 
 test("windows kill survives taskkill being unavailable or refusing", () => {
   const pty = stubPty();
-  assert.doesNotThrow(() => windowsPty.kill(pty, 0, true));
+  assert.doesNotThrow(() => win32Ops.killPty(pty, 0, true));
   assert.equal(pty.calls.length, 1, "the pty handle is still released");
 });
 
@@ -74,7 +75,7 @@ test("windows kill still releases the pty handle when pty.kill throws", () => {
       throw new Error("already torn down");
     },
   };
-  assert.doesNotThrow(() => windowsPty.kill(exploding, 0, false));
+  assert.doesNotThrow(() => win32Ops.killPty(exploding, 0, false));
 });
 
 test("a string chunk is decoded to the bytes ConPTY produced", () => {
