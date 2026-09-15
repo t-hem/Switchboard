@@ -1,10 +1,12 @@
 # Switchboard — notes for agents working on this repo
 
 **Before doing anything on a new machine, read [TESTING.md](./TESTING.md).** All
-phases are built. Linux is exercised by the suites; Windows has had one real run that
-found two bugs (both since fixed, neither re-verified there). The real fleet,
-`tailscale serve` and the phone remain unverified. That file is the ordered checklist,
-and [WINDOWS-SETUP.md](./WINDOWS-SETUP.md) is the bring-up guide for a Windows box.
+phases are built. Linux is exercised by the suites. Windows has had two real runs: the
+first found two bugs, the second confirmed those fixes and found a third, since fixed
+but not re-verified. The phone has had one run, which found two of its own — fixed, not
+re-verified. The real fleet, `tailscale serve` and the desktop browser have never been
+exercised at all. That file is the ordered checklist, and
+[WINDOWS-SETUP.md](./WINDOWS-SETUP.md) is the bring-up guide for a Windows box.
 
 `switchboard-spec.md` is the authoritative specification. Read it before changing
 anything.

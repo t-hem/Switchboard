@@ -140,6 +140,29 @@ Setup instructions are in the README. Untested on your tailnet.
 
 ## 4. The phone
 
+**First real handset run, 2026-09-15.** A live Claude Code session, driven from the
+phone, found two bugs that the emulated viewport in `mobile.mjs` could not — both since
+fixed, neither re-verified on the handset yet.
+
+- **Send composed the line but never submitted it.** `MobileInputBar` sent
+  `` `${line}\r` `` as one frame, so it reached the pty as a single read. A TUI that
+  reads stdin in bursts treats a multi-character read as *pasted* text and inserts the
+  CR as a newline rather than submitting — the line landed in Claude Code's composer
+  and sat there until a separate Enter was tapped. The line and its return now go as
+  two writes a frame apart.
+- **A multi-select prompt was a dead end.** The quick-key row had `↑` and `⏎` but no
+  `↓`, no Space and no Tab. Space is what toggles a checkbox, so the options could not
+  be changed at all — the prompt could only be escaped. All three keys are now in the
+  row, and `mobile.mjs` asserts they are present.
+
+A third finding is **not** treated as a bug: typing directly into the terminal on a
+phone produces jumbled input. The soft keyboard drives xterm's hidden textarea through
+IME composition, and autocorrect rewrites characters already sent to the pty. The input
+bar exists because that path does not work. If it is ever worth addressing, the fix is
+to focus the input bar when the terminal is tapped, not to repair raw typing.
+
+- [ ] **Re-verify both fixes on the handset** — compose a line, tap Send once, and see
+      it submit; then answer a multi-select prompt using the quick keys alone.
 - [ ] **Installs to the home screen** from the HTTPS origin and launches standalone.
 - [ ] **The couch test** (spec §1, the one-line test of success): from the phone,
       see that a Claude Code session on the Windows desktop is blocked on a permission
@@ -147,6 +170,24 @@ Setup instructions are in the README. Untested on your tailnet.
       without SSH and without touching the desktop.
 
 That last one is the whole point of the project. Everything else is scaffolding for it.
+
+---
+
+## 5. The desktop browser — never opened by hand
+
+`ui.mjs` drives the desktop layout in headless Chromium and passes, but no human has
+used it. The phone is fine with the input bar standing between the keyboard and the
+pty; the desktop has no such buffer, so anything wrong with focus or pointer handling
+lands directly on the primary way the client is meant to be used.
+
+- [ ] **Click the terminal and type.** Keystrokes reach the pty in order, with no
+      duplication, no dropped characters and no jumbling. This is the desktop
+      equivalent of the phone finding above, and the one most likely to hurt: there is
+      no input bar to fall back on.
+- [ ] **Clicking works in general** — selecting a session in the list, the
+      new-session modal, the kill button, and click-to-focus on the terminal itself.
+- [ ] **Selection and copy/paste.** Dragging selects, and Ctrl/Cmd-V pastes into the
+      pty rather than being swallowed as a keystroke.
 
 ---
 
