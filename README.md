@@ -13,6 +13,13 @@ transport and dispatch only.
 
 See [`switchboard-spec.md`](./switchboard-spec.md) for the full specification.
 
+Switchboard is deliberately small, and stays that way by pushing everything that
+reasons about the *work* into separate programs that call its HTTP API. Two are
+planned — a PR review loop and a job-application pipeline — and spec §9 records both,
+along with the three API properties they depend on that look like oversights and are
+not. Spec §2's exclusions ("no database", "no persistence", "no pipelines") scope the
+**daemon and client**, not the programs built on top.
+
 ## Status
 
 | Phase | Scope | State |

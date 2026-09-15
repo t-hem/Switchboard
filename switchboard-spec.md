@@ -20,16 +20,20 @@ Sitting on the couch with a phone, the operator can see that a Claude Code sessi
 
 ---
 
-## 2. Non-goals — do not build these
+## 2. Non-goals — do not build these into Switchboard
 
-These are deliberate exclusions. Do not add them, do not design "hooks for them later," do not leave TODOs about them.
+These are deliberate exclusions **from the daemon and the web client**, and within those two things they are absolute: do not add them, do not design "hooks for them later," do not leave TODOs about them.
+
+They are *not* a list of things that may never exist. Several are planned as separate programs that call this one's HTTP API — see §9. The distinction is what keeps this project small: Switchboard is transport and dispatch, and everything that reasons about the *work* lives outside it. When you need one of these, the answer is a program calling the API, never a feature in the daemon.
 
 - **No multi-user support.** Exactly one human uses this. No accounts, no roles, no user table.
-- **No session history persistence.** When a session ends, it's gone. Git and PR threads are the record of work. Scrollback lives in memory only.
-- **No database.** No SQLite, no Postgres, no ORM. In-memory state plus one JSON config file per host.
-- **No PR automation, code review pipeline, or model routing.** Out of scope entirely.
+- **No session history persistence _in the daemon_.** Scrollback is an in-memory ring buffer, never written to disk; when the daemon exits it is gone. A caller that needs a durable record of what an agent did keeps its own (§9).
+- **No database _in the daemon_.** No SQLite, no Postgres, no ORM here. In-memory state plus one JSON config file per host. A program built on top may use whatever storage it likes; that storage does not live in this repo and the daemon never reads it.
+- **No pipelines in the daemon** — no PR automation, no code review loop, no application automation, no model routing. Each is a separate program (§9). Switchboard owes them exactly one thing: starting and observing an agent session on a chosen machine from something that is not a browser. "No model routing" means the *daemon* never chooses a model or a provider; passing `--model` through to a CLI is just argv and is already supported by `extraArgs`.
 - **No real-time sync between clients.** One client at a time (see §6). Refresh is an acceptable sync mechanism.
-- **No agent-specific parsing or structured protocol adapters.** Sessions are raw PTYs. Do not parse Claude Code's JSON stream format or Codex's proto mode. Universal PTY handling is the whole point — it means a new agent CLI is a config line, not a code change.
+- **No agent-specific parsing or structured protocol adapters.** Sessions are raw PTYs. Do not parse Claude Code's JSON stream format or Codex's proto mode, and never make the transport depend on which agent is running. Universal PTY handling is the whole point — it means a new agent CLI is a config line, not a code change.
+
+  The test is that last sentence, not the word "parsing". Reading something out of the *rendered* scrollback for display — the model a session is currently using, say — is allowed **provided the patterns live in `agents.json` and a new agent is still a config line**. It must be best-effort and cosmetic: a miss shows nothing, a bad pattern never breaks a row or a session, and nothing in the spawn, stream or kill path may depend on a match. Anything that makes the daemon *understand* an agent's protocol is the thing being excluded here.
 - **No auth beyond a static bearer token per host.** The network boundary is Tailscale.
 - **No Docker, no Kubernetes, no reverse proxy config.** `tailscale serve` handles TLS.
 
@@ -157,6 +161,8 @@ All routes except `/health` require `Authorization: Bearer <token>`. Reject with
 
 The daemon never reaches out to another daemon. All cross-host movement of `agents.json` is done by the client, which is the only component that knows the full host list and holds every token.
 
+**`POST /sessions` is authenticated but deliberately _not_ claim-gated (§6).** A program that spawns a session is not a browser and must not evict whoever is sitting in front of one. This looks like an oversight and is not; do not "fix" it. The same reasoning governs any future read-only observation route (§9).
+
 ### 4.4 WebSocket
 
 `GET /sessions/:id/stream?token=<token>` — upgrade to WS. (Token goes in the query string because browsers can't set headers on `WebSocket`. Acceptable inside the tailnet; the token never leaves it.)
@@ -247,6 +253,8 @@ Show the diff before applying rather than syncing silently. With one user this i
 
 There is no way around installing the actual CLI on each machine — accept that. What the spec does instead is make the gap visible and actionable: when an agent is configured but unavailable on a host, surface its `install` string in the UI as a copyable command, so the remaining work is pasting one line into that machine's terminal rather than remembering what the install command was. The daemon must not execute `install` itself; keep it display-only.
 
+## 6. Single client at a time
+
 Deliberately crude, because the multi-client problem is being defined out of existence rather than solved.
 
 Each browser generates a stable `clientId` (nanoid in `localStorage`) and a `clientLabel` (editable in settings, e.g. "laptop", "phone").
@@ -304,18 +312,41 @@ Responsive layout, line-input bar, quick-send button row, PWA manifest and servi
 ## 8. Engineering constraints
 
 - TypeScript strict mode on. No `any` outside of narrow, commented interop points.
-- No test framework beyond `node:test` for the ring buffer and the claim-state machine — those two have real logic worth pinning. Everything else is verified by the manual acceptance steps above. Do not write UI tests.
+- No test framework beyond `node:test`, and only where there is real logic to pin: the scrollback ring buffer, the claim state machine, the orphan ledger's PID-reuse guard, the per-platform process ops, and the kill escalation. The last two matter disproportionately because the Windows half cannot be executed by the machine that reviews it — they are written against plain objects and fakes so both platforms are exercised from either OS. Everything else is verified by the acceptance harnesses. Do not write UI tests.
 - Windows paths are first-class. Never assume `/` separators, never assume a POSIX shell, and test `cwd` validation with drive-letter paths.
 - The daemon must start fine when zero agents are installed and must not crash when a PTY dies unexpectedly.
 - Log to stdout only. No log files, no log rotation, no structured logging library.
 
 ---
 
-## 9. Deferred, with notes (do not implement)
+## 9. Deferred, with notes (do not implement yet)
+
+Unlike §2, these are not exclusions. They are the next things, written down so they get built deliberately rather than improvised into the daemon under pressure. Nothing here is started without a decision to start it.
 
 - **tmux-backed sessions.** If daemon restarts killing sessions becomes irritating, wrap each PTY in `tmux new-session -d -s sw-<id>` on Linux and attach to it, so the daemon can re-discover and reattach on boot. Windows has no equivalent, so this would make the two platforms diverge. Revisit only if the pain is real.
-- **Idle push notifications.** The amber "waiting for input" state is exactly the signal worth pushing. An `ntfy` or Telegram POST when a session crosses the idle threshold would mean not having to check at all. Small addition once §5.2 exists.
-- **PR review pipeline.** Separate project. It consumes this one's ability to launch a session on a chosen host, so keep `POST /sessions` clean enough to be called by a script.
+
+- **Idle push notifications.** The amber "waiting for input" state is exactly the signal worth pushing. An `ntfy` or Telegram POST when a session crosses the idle threshold would mean not having to check at all. Small addition once §5.2 exists. Note that this is the same need as a pipeline's "tell me where it got stuck" — one mechanism should serve both.
+
+- **Reading a session's output without attaching to it.** Today the scrollback buffer is reachable only by opening the WebSocket, and that upgrade is claim-gated (§6). So a program that wants to know *what an agent actually did* must either take the claim — evicting whoever is at a browser — or not look. Both pipelines below need to look.
+
+  The shape that fits: `GET /sessions/:id/scrollback` returning the ring buffer's current bytes as `application/octet-stream`. Authenticated, and **not** claim-gated, for exactly the reason `POST /sessions` is not (§4.3): a non-browser caller must be able to observe a session without evicting a human from it. It reads in-memory state and writes nothing, so it does not touch the no-persistence rule.
+
+  Do not build it until a caller exists.
+
+- **Programs built on Switchboard.** Two are planned. Both live outside this repo and talk to it over the HTTP API. Neither adds anything to the daemon.
+
+  - **The review loop.** An agent does work and opens a PR; a *different* model reviews it; Thomas accepts or rejects; a rejection opens a fresh session seeded with the review notes and his own. See `LATER-review-loop.md`.
+  - **The application pipeline.** Scrape job postings, spawn an agent to tailor a résumé to each posting, automate as much of the application as it can, report back where it got stuck, and keep a durable record of every posting, artefact and outcome so it can be pulled back later.
+
+  The second one needs real storage, and that storage belongs to the pipeline. §2's "no database" keeps *this* codebase small and the fleet portable; it is not a claim that the work these programs do is unworthy of a database. Resist the pull to put it here — a daemon that knows about job applications is no longer transport and dispatch.
+
+  What Switchboard owes both, and must not regress:
+
+  - `POST /sessions` stays authenticated but **claim-free**, so a pipeline can spawn a session without evicting a browser (§4.3).
+  - Exited sessions stay in the map with their exit code until something removes them, so a caller can poll `GET /sessions` for completion. **Do not add auto-reaping.**
+  - `label` and `extraArgs` on `POST /sessions`, so many concurrent pipeline sessions are tellable apart in one merged list.
+
+  These three are load-bearing for work that does not exist yet, which makes them exactly the kind of thing a later tidy-up deletes. They are recorded here so that does not happen.
 
 ---
 
