@@ -6,6 +6,7 @@ import * as pty from "node-pty";
 
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
+import { ptyChunkToBytes, ptyPlatform } from "./ptyplatform.js";
 import { RingBuffer } from "./ringbuffer.js";
 import type { HostConfig, Session } from "./types.js";
 
@@ -102,18 +103,12 @@ export class SessionManager {
     const cols = clampDimension(opts.cols, DEFAULT_COLS);
     const rows = clampDimension(opts.rows, DEFAULT_ROWS);
 
-    // node-pty hands `file` straight to CreateProcess, which cannot execute batch
-    // files. npm installs CLIs on Windows as .cmd shims (claude.cmd, gemini.cmd), so
-    // the probe finds them and marks the agent available, and the spawn would then
-    // fail with "CreateProcess failed". Run those through the command interpreter.
-    // ConPTY's kill tears down every process attached to the console, so the extra
-    // cmd.exe layer does not leave the agent behind when the session is killed.
-    let file = executable;
-    let args = [...resolvedAgent.args, ...(opts.extraArgs ?? [])];
-    if (process.platform === "win32" && /\.(cmd|bat)$/i.test(executable)) {
-      args = ["/c", executable, ...args];
-      file = process.env["ComSpec"] ?? "cmd.exe";
-    }
+    // How an executable is actually launched is platform business — on Windows a .cmd
+    // shim has to go through the command interpreter. See ptyplatform.ts.
+    const { file, args } = ptyPlatform.spawnCommand(executable, [
+      ...resolvedAgent.args,
+      ...(opts.extraArgs ?? []),
+    ]);
 
     // The same environment object the availability probe used, so an agent can never
     // report available and then fail to launch (or the reverse).
@@ -123,8 +118,9 @@ export class SessionManager {
       rows,
       cwd,
       env: this.registry.env as Record<string, string>,
-      // Unset the encoding so onData delivers raw Buffers; PTY bytes are forwarded
-      // to the client verbatim and must not be decoded and re-encoded on the way.
+      // Unset the encoding so onData delivers raw Buffers and PTY bytes reach the
+      // client verbatim. Honoured on POSIX only — Windows ignores it, which the
+      // onData handler below has to cope with.
       encoding: null,
     });
 
@@ -154,9 +150,10 @@ export class SessionManager {
     this.ledger.add({ id, pid: child.pid, agent: opts.agent, cwd, startedAt: session.createdAt });
 
     child.onData((data) => {
-      // Typed as string by node-pty, but `encoding: null` makes it a Buffer at
-      // runtime. This cast is the one place that interop wart is handled.
-      const chunk = data as unknown as Buffer;
+      // Typed as string by node-pty, but what actually arrives depends on the
+      // platform: a Buffer on POSIX, a string on Windows. ptyChunkToBytes documents
+      // why and is the one place that interop wart is handled.
+      const chunk = ptyChunkToBytes(data as unknown as string | Buffer);
       runtime.scrollback.append(chunk);
       session.lastOutputAt = Date.now();
       for (const sub of runtime.subscribers) {
@@ -273,23 +270,13 @@ export class SessionManager {
   }
 
   /**
-   * Ask a pty to die, in the way the platform actually supports.
-   *
-   * POSIX: name the signal explicitly. node-pty defaults to SIGHUP, which a process
-   * can legitimately ignore — and agent CLIs that detach from a closing terminal do.
-   *
-   * Windows: node-pty *throws* if given any signal ("Signals not supported on
-   * windows"), so passing one would mean neither the terminate nor the escalation
-   * ever reached the process and every kill would silently do nothing. Its bare
-   * kill() terminates every process attached to the ConPTY console, which is the
-   * whole tree, so there is nothing to escalate to.
+   * Ask a pty to die, in the way the platform actually supports — which differs
+   * enough between Windows and POSIX that it lives in ptyplatform.ts. `force` is the
+   * escalation step, reached after the grace period when the first attempt did not
+   * take.
    */
   #signal(runtime: SessionRuntime, force: boolean): void {
-    if (process.platform === "win32") {
-      runtime.pty.kill();
-      return;
-    }
-    runtime.pty.kill(force ? "SIGKILL" : "SIGTERM");
+    ptyPlatform.kill(runtime.pty, runtime.session.pid, force);
   }
 
   #waitForExit(runtime: SessionRuntime, ms: number): Promise<boolean> {

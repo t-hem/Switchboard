@@ -28,15 +28,20 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 
 ## 1. Windows daemon — highest risk
 
-Two bugs here were found by reading node-pty's source and fixed, but **no Windows
-code path has ever executed**. Assume this is where problems are.
+**First real Windows run happened on `desktop-icu1edp` (Windows 10).** Spawn, the
+`.cmd` shim path, `PATHEXT` probing, drive-letter paths and `processStartTime` all
+pass. It found two further bugs, both since fixed but **neither yet re-verified on
+Windows**: no terminal output reached clients at all, and `DELETE` answered 204
+without killing anything. Both are the reason to re-run this section rather than
+trust it.
 
 [`WINDOWS-SETUP.md`](./WINDOWS-SETUP.md) is the self-contained bring-up guide for the
 machine itself — prerequisites, `host.json`, `tailscale serve`, and this list with the
 known traps attached. Hand it to a session running on that machine.
 
-- [ ] **`npm install` builds `node-pty`.** Needs Visual Studio Build Tools with the
-      "Desktop development with C++" workload. Nothing works until this does.
+- [x] **`npm install` installs `node-pty`.** Verified on Windows 10: 1.1.0 ships
+      prebuilt Windows binaries and never invoked node-gyp, so VS Build Tools and
+      Python are **not** prerequisites.
 - [ ] **Daemon starts.** `npm run dev:host`, then `curl http://localhost:7777/health`.
       Should list agents and not crash when some are missing.
 - [ ] **Availability probe finds `.cmd` shims.** An npm-installed `claude` is
@@ -55,7 +60,12 @@ known traps attached. Hand it to a session running on that machine.
       button and confirm the agent interrupts rather than `cmd.exe` swallowing it.
 - [ ] **Orphan recovery.** End the daemon from Task Manager (*not* Ctrl-C), restart,
       confirm it reports survivors, then *Kill all* and confirm they are really gone.
-      Windows has no Job Object here, so orphans are likelier than on Linux.
+      **Hard to stage on Windows, and the reason is interesting:** killing the daemon
+      closes its ConPTY handles and the console teardown takes the agents with it, so
+      survivors mostly do not happen — the opposite of Linux, and the opposite of what
+      this file previously assumed. Note the tension with the kill bug below: console
+      teardown on daemon exit reaches the tree, an explicit `pty.kill()` does not.
+      Not yet explained; worth understanding before trusting either.
 - [ ] **`processStartTime` is populated.** `%USERPROFILE%\.switchboard\sessions.json`
       should hold `win32:<ticks>` per entry. Missing means the PowerShell `StartTime`
       probe failed, and orphan killing will refuse to act — safe, but cleanup never

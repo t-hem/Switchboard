@@ -96,16 +96,28 @@ export function identityMatches(pid: number, recorded: ProcessIdentity): boolean
 }
 
 /**
- * Terminate a process we no longer hold a pty handle for. On Windows the agent's own
- * children would survive a bare kill, so the process tree is taken down together.
+ * Terminate a Windows process *and its children*, which a bare kill leaves running.
+ *
+ * Exported unconditionally rather than hidden behind a platform check so the Windows
+ * pty path can name it directly — see ptyplatform.ts. Calling it on a non-Windows
+ * machine throws (there is no taskkill), which is the honest outcome and what its
+ * callers there are written to expect.
+ */
+export function killProcessTreeWindows(pid: number, force: boolean): void {
+  execFileSync("taskkill", force ? ["/PID", String(pid), "/T", "/F"] : ["/PID", String(pid), "/T"], {
+    timeout: 5000,
+    windowsHide: true,
+    stdio: "ignore",
+  });
+}
+
+/**
+ * Terminate a process we no longer hold a pty handle for, on whichever platform this
+ * is. The orphan sweeper's case: a pid recovered from the ledger with no pty attached.
  */
 export function killByPid(pid: number, force: boolean): void {
   if (process.platform === "win32") {
-    execFileSync("taskkill", force ? ["/PID", String(pid), "/T", "/F"] : ["/PID", String(pid), "/T"], {
-      timeout: 5000,
-      windowsHide: true,
-      stdio: "ignore",
-    });
+    killProcessTreeWindows(pid, force);
     return;
   }
   process.kill(pid, force ? "SIGKILL" : "SIGTERM");

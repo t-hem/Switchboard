@@ -14,7 +14,7 @@ if you find yourself writing a feature, stop and report instead.
 |---|---|---|
 | `thomas-ai-machine` | Linux | Daemon **and** serves the web client (always-on) |
 | Laptop | Windows 11 | Daemon only |
-| `desktop-i7san97` | Windows 10 | Daemon only |
+| `desktop-icu1edp` | Windows 10 | Daemon only |
 | Phone | — | Client only, no daemon |
 
 Tailnet is `tail0f855c.ts.net`. The web client lives at
@@ -41,12 +41,16 @@ the bugs, and read "When it breaks" below before you start guessing.
 ```powershell
 winget install OpenJS.NodeJS.LTS       # Node 22+ required
 winget install Git.Git
-winget install Microsoft.VisualStudio.2022.BuildTools
 ```
 
-Then open the **Visual Studio Installer** and tick the **"Desktop development with
-C++"** workload. `node-pty` is a native module built from source on install — nothing
-here works until that toolchain exists.
+**No C++ toolchain is needed.** `node-pty` 1.1.0 ships prebuilt Windows binaries
+(`prebuilds/win32-x64`) and its install script tries those before falling back to
+node-gyp, so VS Build Tools and Python are not prerequisites — verified on a bare
+Windows 10 box, where `npm install` never invoked node-gyp. Only install the ~6GB of
+Build Tools if `npm install` actually falls through to a compile.
+
+Neither Node nor Git needs elevation: if this shell is not elevated, portable extracts
+under something like `C:\Apps\tools` added to the user PATH work fine.
 
 Verify in a **new** terminal (PATH changes need one):
 
@@ -152,7 +156,7 @@ Nothing goes on `tailscale funnel` — this is tailnet-only.
 [`TESTING.md`](./TESTING.md) §1 is authoritative and explains *why* each item is
 risky. Work it top to bottom and report results item by item:
 
-- [ ] `npm install` builds `node-pty`
+- [ ] `npm install` installs `node-pty` (prebuilt binary, no compile)
 - [ ] Daemon starts; `/health` lists agents and doesn't crash on the missing ones
 - [ ] Availability probe finds `.cmd` shims (resolved via `PATHEXT`)
 - [ ] **Spawning a `.cmd` agent** — the likely blocker, see below
@@ -170,17 +174,30 @@ dodge it.
 
 ## When it breaks
 
-Two Windows bugs were already found by reading node-pty's source. Both are the same
-shape: an API correct on POSIX and wrong on Windows. `node_modules/node-pty/src/` is
-readable and worth reading before you theorise.
+Four Windows bugs are known, all the same shape: an API correct on POSIX and wrong on
+Windows. Two were found by reading node-pty's source, two by the first real Windows
+run. `node_modules/node-pty/` is readable and worth reading before you theorise.
+
+The platform-divergent pty behaviour now lives in `packages/host/src/ptyplatform.ts`,
+one object per platform, so a Windows change cannot alter the POSIX path.
+`packages/host/test/ptyplatform.test.ts` drives **both** objects and runs on any OS —
+add a case there for anything new you find, so the Linux box can catch a Windows
+regression it cannot otherwise reach.
 
 - **"Unable to start terminal process: CreateProcess failed"** on spawn —
   `CreateProcess` cannot execute `.cmd`/`.bat` and node-pty passes the path straight
-  to it. The daemon runs those through `cmd.exe /c`; see the `win32` branch in
-  `packages/host/src/sessions.ts#create` (~line 112).
-- **Kills silently do nothing** — node-pty *throws* on Windows if given a signal
-  ("Signals not supported on windows"), so the daemon calls bare `kill()` there, which
-  tears down the whole ConPTY console. See `sessions.ts#signal` (~line 288).
+  to it. `windowsPty.spawnCommand` runs those through `cmd.exe /c`.
+- **No output reaches any client, while the daemon looks healthy** — the ConPTY agent
+  calls `setEncoding("utf8")` on the conout socket unconditionally, so `encoding: null`
+  is ignored and `onData` delivers **strings**, not Buffers. Every chunk then threw
+  `chunk.copy is not a function` inside the ring buffer before any subscriber ran.
+  `ptyChunkToBytes` normalises it. If you see an attached WebSocket receive zero frames
+  while `/health` is fine, this is the shape.
+- **Kills answer 204 but nothing dies** — node-pty *throws* on Windows if given a
+  signal, and its bare `kill()` only kills the pids ConPTY reports attached to the
+  console, in a promise it never awaits. The `cmd.exe -> node.exe -> agent.exe` tree
+  outlives it: three killed sessions left nine live processes. `windowsPty.kill` takes
+  the tree down with `taskkill /T` first, then releases the pty handle.
 - **`sessions.json` missing `processStartTime`** — the PowerShell
   `(Get-Process -Id X).StartTime.Ticks` probe failed. Orphan killing then refuses to
   act, which is safe but means cleanup never works. Don't "fix" it by removing the
