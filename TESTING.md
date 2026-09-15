@@ -14,7 +14,7 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 
 | Area | Covered by |
 |---|---|
-| Ring buffer, claim state machine, orphan ledger incl. PID-reuse guard | `npm test` — 41 cases |
+| Ring buffer, claim state machine, orphan ledger incl. PID-reuse guard, kill escalation against fakes, both platforms' `ProcessOps` | `npm test` — 64 cases (one skipped on Windows) |
 | Spawn, input/output, resize, scrollback replay across a disconnect, exit codes, delete | `packages/host/acceptance/sessions.mjs` |
 | Daemon crash → orphan reconciliation → verified kill; clean shutdown leaves nothing | `packages/host/acceptance/orphans.mjs` |
 | A real Claude Code session, asserted on the rendered screen | `packages/host/acceptance/real-agent.mjs` |
@@ -28,12 +28,23 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 
 ## 1. Windows daemon — highest risk
 
-**First real Windows run happened on `desktop-icu1edp` (Windows 10).** Spawn, the
-`.cmd` shim path, `PATHEXT` probing, drive-letter paths and `processStartTime` all
-pass. It found two further bugs, both since fixed but **neither yet re-verified on
-Windows**: no terminal output reached clients at all, and `DELETE` answered 204
-without killing anything. Both are the reason to re-run this section rather than
-trust it.
+**Second Windows run on `desktop-icu1edp` (Windows 10) re-verified the fixes.** The two
+bugs the first run found — no terminal output reaching clients, and `DELETE` answering
+204 without killing anything — are confirmed fixed against real hardware: a `codex`
+session streamed 1451 bytes as binary frames with no `TypeError` in the log, and
+`DELETE` took down the whole three-process `cmd.exe` → `node.exe` → `codex.exe` tree,
+leaving the ledger empty.
+
+That run found a third bug of the same shape, since fixed: a refused graceful
+`taskkill /T` propagated out of `killByPid`, and because `killOrphan` treats a throw
+from the soft kill as terminal, every non-forced orphan kill reported `failed` without
+ever escalating. Only `force: true` worked. Windows console processes — which every
+agent is — can only be terminated with `/F`, so that refusal is the normal case, not an
+error.
+
+Everything below is ticked from that run unless noted. Two items remain genuinely
+unverified: Ctrl-C through the `cmd.exe` layer, and orphan recovery by the
+Task-Manager route.
 
 [`WINDOWS-SETUP.md`](./WINDOWS-SETUP.md) is the self-contained bring-up guide for the
 machine itself — prerequisites, `host.json`, `tailscale serve`, and this list with the
@@ -42,39 +53,49 @@ known traps attached. Hand it to a session running on that machine.
 - [x] **`npm install` installs `node-pty`.** Verified on Windows 10: 1.1.0 ships
       prebuilt Windows binaries and never invoked node-gyp, so VS Build Tools and
       Python are **not** prerequisites.
-- [ ] **Daemon starts.** `npm run dev:host`, then `curl http://localhost:7777/health`.
-      Should list agents and not crash when some are missing.
-- [ ] **Availability probe finds `.cmd` shims.** An npm-installed `claude` is
-      `claude.cmd`, resolved via `PATHEXT`. `/health` should say `available: true`.
-- [ ] **Spawning a `.cmd` agent — the likely blocker.** `CreateProcess` cannot execute
-      batch files and node-pty passes the path straight to it, so `.cmd`/`.bat` are
-      launched through `cmd.exe /c`.
-      *If it fails with "Unable to start terminal process: CreateProcess failed",*
-      look at the `win32` branch in `packages/host/src/sessions.ts#create`.
+- [x] **Daemon starts.** Reports `TOM-DESKTOP (win32)`, lists all four agents and does
+      not crash on the two that are missing.
+- [x] **Availability probe finds `.cmd` shims.** npm-installed `claude.cmd` and
+      `codex.cmd` both resolve via `PATHEXT` and report `available: true` — and flip
+      from unavailable **without a daemon restart**, as documented.
+- [x] **Spawning a `.cmd` agent — the likely blocker.** `codex.cmd` launches through
+      `cmd.exe /c` and produces the expected three-deep process tree.
+      *If it regresses with "Unable to start terminal process: CreateProcess failed",*
+      look at `spawnCommand` in `packages/host/src/platform/win32.ts`.
       Claude Code's **native Windows installer** gives a real `claude.exe` and skips
-      this path entirely — prefer it if this fights back.
-- [ ] **Killing a session actually kills it.** `DELETE /sessions/:id`, then confirm in
-      Task Manager. node-pty *throws* on Windows if given a signal, so the daemon
-      calls bare `kill()` there; if that regresses, every kill silently does nothing.
+      this path entirely — so test with npm-installed `codex`, which does not.
+- [x] **Terminal output actually reaches a client.** The regression that made the daemon
+      look healthy and stream nothing. Attach a WebSocket and assert **binary** frames
+      arrive: `encoding: null` is ignored on Windows, so a string reaching
+      `RingBuffer.append` throws before any subscriber runs. `src/ptybytes.ts` normalises
+      it.
+- [x] **Killing a session actually kills it.** `DELETE /sessions/:id` took the whole
+      tree down, confirmed by pid. A bare `pty.kill()` is not enough — the `cmd.exe`
+      layer outlives it — so the tree goes down with `taskkill /T`.
 - [ ] **Ctrl-C reaches the agent** through the `cmd.exe` layer — use the quick-send
       button and confirm the agent interrupts rather than `cmd.exe` swallowing it.
-- [ ] **Orphan recovery.** End the daemon from Task Manager (*not* Ctrl-C), restart,
-      confirm it reports survivors, then *Kill all* and confirm they are really gone.
-      **Hard to stage on Windows, and the reason is interesting:** killing the daemon
-      closes its ConPTY handles and the console teardown takes the agents with it, so
-      survivors mostly do not happen — the opposite of Linux, and the opposite of what
-      this file previously assumed. Note the tension with the kill bug below: console
-      teardown on daemon exit reaches the tree, an explicit `pty.kill()` does not.
-      Not yet explained; worth understanding before trusting either.
-- [ ] **`processStartTime` is populated.** `%USERPROFILE%\.switchboard\sessions.json`
-      should hold `win32:<ticks>` per entry. Missing means the PowerShell `StartTime`
-      probe failed, and orphan killing will refuse to act — safe, but cleanup never
-      works.
-- [ ] **Drive-letter paths.** Start a session in `C:\dev\somerepo`, and confirm
-      `workspaceRoots` with backslashes populates the directory picker.
-- [ ] **`pathPrepend` if needed.** If agents were installed under a different Node
-      version, add that `bin` directory to `host.json`'s `pathPrepend` — never an
-      absolute path in `agents.json`, which is synced fleet-wide.
+- [x] **Orphan recovery — verified by hand-staging, not by crashing the daemon.** A
+      detached process plus a matching `sessions.json` entry is reported as a survivor
+      on startup, nothing is killed automatically, `GET /orphans` lists it, and
+      `POST /orphans/kill` with `force: false` escalates and kills it (`[ledger] pid …
+      ignored SIGTERM; escalating`). The **Task-Manager route is still unverified**, and
+      may be unstageable: killing the daemon closes its ConPTY handles and the console
+      teardown takes the agents with it, so survivors mostly do not happen — the
+      opposite of Linux.
+      The tension with the kill bug is still not fully explained, but there is now a
+      clue: after `taskkill` tears the console down, `pty.kill()` spawns node-pty's
+      `conpty_console_list_agent`, which fails with `AttachConsole failed`. If
+      `pty.kill()` depends on enumerating the console to find pids, that is consistent
+      with console teardown reaching the tree while an explicit `pty.kill()` does not.
+      Worth confirming in node-pty's source before relying on it.
+- [x] **`processStartTime` is populated.** Entries hold `win32:<ticks>` — e.g.
+      `win32:639250192389941815`. The PowerShell `StartTime` probe works here.
+- [x] **Drive-letter paths.** `workspaceRoots: ["C:\\Apps"]` populates the picker with
+      `C:\Apps\Switchboard`, and sessions start in it.
+- [x] **`pathPrepend` was not needed.** npm's global prefix on this machine already sits
+      on `PATH`, so the probe finds the agents with an empty `pathPrepend`. Still the
+      right fix if a future machine disagrees — never an absolute path in `agents.json`,
+      which is synced fleet-wide.
 
 ---
 
