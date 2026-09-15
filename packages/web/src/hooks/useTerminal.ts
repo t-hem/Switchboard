@@ -27,6 +27,11 @@ export type TerminalHandle = {
   /** Send text to the pty — used by the mobile line-input bar and quick keys. */
   send: (data: string) => void;
   reconnect: () => void;
+  /** False while the viewport is scrolled up, so the live view can be offered back. */
+  atBottom: boolean;
+  scrollToBottom: () => void;
+  /** xterm's scrollable element, once it exists — what TerminalScrollbar drives. */
+  viewport: HTMLElement | null;
 };
 
 /**
@@ -57,7 +62,13 @@ export function useTerminal({
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [evictedBy, setEvictedBy] = useState<string | null>(null);
   const [lockedBy, setLockedBy] = useState<string | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  // State, not a ref: the scrollbar renders nothing until this exists, and xterm
+  // only creates it inside the effect below — after any child has already mounted.
+  const [viewport, setViewport] = useState<HTMLElement | null>(null);
 
+  // Mirrors `atBottom` so the per-render check can bail without touching state.
+  const atBottomRef = useRef(true);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -79,6 +90,10 @@ export function useTerminal({
     }
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    termRef.current?.scrollToBottom();
+  }, []);
+
   const reconnect = useCallback(() => {
     backoffRef.current = BACKOFF_START_MS;
     setEvictedBy(null);
@@ -94,6 +109,8 @@ export function useTerminal({
     setState("connecting");
     setExitCode(null);
     setLockedBy(null);
+    atBottomRef.current = true;
+    setAtBottom(true);
 
     const term = new Terminal({
       cursorBlink: true,
@@ -108,6 +125,39 @@ export function useTerminal({
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
+
+    /**
+     * Give touch scrolling back to the browser.
+     *
+     * xterm binds `touchstart`/`touchmove` to the `.xterm` root — an *ancestor* of
+     * the viewport — with `{passive: false}`, and preventDefault()s any move its own
+     * 1:1 drag handled. Stopping the events at `.xterm-viewport`, which is where
+     * they now land (see the `pointer-events` rule in index.css), means they never
+     * reach that listener, so the browser scrolls the element itself with the
+     * momentum and fling it would give any other scrollable div.
+     *
+     * Nothing else is needed to keep xterm in step: the viewport also registers a
+     * plain `scroll` listener that syncs the buffer from `scrollTop`, so native
+     * scrolling already drives it correctly.
+     */
+    const viewportElement = host.querySelector<HTMLElement>(".xterm-viewport");
+    const stopTouch = (event: Event): void => event.stopPropagation();
+    viewportElement?.addEventListener("touchstart", stopTouch);
+    viewportElement?.addEventListener("touchmove", stopTouch);
+    setViewport(viewportElement);
+
+    // Scrolled up, there is no way back to the live view on a phone — no End key,
+    // and output keeps arriving below. `onRender` covers new output pushing the
+    // baseline down; `onScroll` covers the user moving the viewport.
+    const syncAtBottom = (): void => {
+      const buffer = term.buffer.active;
+      const next = buffer.viewportY >= buffer.baseY;
+      if (next === atBottomRef.current) return;
+      atBottomRef.current = next;
+      setAtBottom(next);
+    };
+    const scrollSub = term.onScroll(syncAtBottom);
+    const renderSub = term.onRender(syncAtBottom);
 
     const safeFit = (): { cols: number; rows: number } | null => {
       if (!host.clientWidth || !host.clientHeight) return null;
@@ -218,6 +268,11 @@ export function useTerminal({
       if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       observer.disconnect();
+      viewportElement?.removeEventListener("touchstart", stopTouch);
+      viewportElement?.removeEventListener("touchmove", stopTouch);
+      setViewport(null);
+      scrollSub.dispose();
+      renderSub.dispose();
       inputSub.dispose();
       socketRef.current?.close();
       socketRef.current = null;
@@ -227,5 +282,5 @@ export function useTerminal({
     };
   }, [entry, sessionId, container, clientId, clientLabel, reconnectNonce]);
 
-  return { state, exitCode, evictedBy, lockedBy, send, reconnect };
+  return { state, exitCode, evictedBy, lockedBy, send, reconnect, atBottom, scrollToBottom, viewport };
 }

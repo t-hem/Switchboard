@@ -24,3 +24,48 @@ body {
   color: #e6e8eb;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+
+/* --- Terminal scrolling on a touch screen ---------------------------------
+   xterm replaces the browser's own touch scrolling with a 1:1 drag: it binds
+   `touchmove` to the `.xterm` root with `{passive: false}` and preventDefault()s
+   every move its `Viewport.handleTouchMove` consumes, which is everywhere except
+   the very top and bottom of the buffer. The result on a phone is scrollback that
+   moves with the finger and stops dead — no fling, no momentum.
+
+   Handing scrolling back to the browser takes two things, and this is the first.
+   `.xterm-viewport` is the element that actually scrolls, but xterm appends
+   `.xterm-screen` after it and gives it `position: relative`, so the screen paints
+   on top and is what a finger lands on. Its scroll chain does not include the
+   viewport, so a native scroll never even starts. Making it transparent to pointers
+   puts the touch on the viewport itself. The second half is the `touchmove` trap in
+   `useTerminal.ts`, which keeps the event away from xterm's handler.
+
+   The cost is touch selection on the terminal, which does not work on a phone
+   anyway (see TESTING.md §4) — the input bar is the input path. Keyboard and mouse
+   are untouched: `pointer: coarse` is the *primary* pointer, so a desktop with a
+   touchscreen still reports `fine`.
+
+   The fallback, should that not hold on some handset, is TerminalScrollbar — a thumb
+   big enough to drag. The viewport's own scrollbar cannot serve: phones use overlay
+   scrollbars, which ignore `::-webkit-scrollbar` (measured at 0px of layout width). */
+@media (pointer: coarse) {
+  .xterm .xterm-screen {
+    pointer-events: none;
+  }
+
+  .xterm .xterm-viewport {
+    overscroll-behavior: contain;
+  }
+}
+
+/* Shown only where a finger is the primary pointer. The width-based `md:` breakpoint
+   would be wrong for this: a narrow desktop window is still driven by a mouse. */
+.touch-only {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .touch-only {
+    display: block;
+  }
+}

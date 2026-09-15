@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 import { useTerminal, type ConnectionState } from "../hooks/useTerminal.ts";
 import { MobileInputBar } from "./MobileInputBar.tsx";
+import { TerminalScrollbar } from "./TerminalScrollbar.tsx";
 import type { HostEntry, Session } from "../types.ts";
 
 const CONNECTION_LABEL: Record<ConnectionState, { text: string; className: string }> = {
@@ -73,8 +74,20 @@ export function TerminalView({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-hidden bg-[#0b0d10] p-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-[#0b0d10] p-1">
         <div ref={container} className="h-full w-full" />
+        <TerminalScrollbar viewport={term.viewport} />
+        {/* Scrolled up with output still arriving, there is otherwise no way back to
+            the live view on a phone — no End key, and the buffer keeps growing. */}
+        {!term.atBottom && (
+          <button
+            onClick={term.scrollToBottom}
+            aria-label="Jump to latest output"
+            className="absolute bottom-3 right-6 rounded-full border border-neutral-600 bg-neutral-900/90 px-3 py-2 text-xs text-neutral-100 shadow-lg backdrop-blur active:bg-neutral-700"
+          >
+            ↓ Latest
+          </button>
+        )}
       </div>
 
       {/* Phone only: on a desktop the real keyboard is already the better input. */}

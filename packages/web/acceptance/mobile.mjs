@@ -181,6 +181,72 @@ console.log("\n=== Ctrl-C interrupts ===");
   await api(`/sessions/${s.id}`, { method: "DELETE" });
 }
 
+console.log("\n=== scrolled up, the live view is one tap away ===");
+{
+  // `cat -v` echoes, so each Enter costs two lines. Enough of them and the buffer
+  // is taller than the viewport, which is the only state the button exists for.
+  const raw = await (await api("/sessions", { method: "POST", body: JSON.stringify({ agent: "raw", cwd: REPO }) })).json();
+  await goBackToList();
+  await sleep(6000);
+  const rows = await page.$$("aside section button");
+  for (const row of rows) {
+    if ((await row.evaluate((el) => el.innerText)).includes(`pid ${raw.pid}`)) { await row.click(); break; }
+  }
+  await waitFor("connected", 15000);
+  await sleep(1000);
+  for (let i = 0; i < 40; i++) await tapKey("Enter");
+  await sleep(1000);
+
+  const jumpVisible = () => page.evaluate(() =>
+    [...document.querySelectorAll("button")].some((b) => b.getAttribute("aria-label") === "Jump to latest output"));
+
+  ok("no jump button while the live view is on screen", !(await jumpVisible()));
+  ok("the terminal scrolled past a screenful",
+     await page.$eval(".xterm-viewport", (el) => el.scrollHeight > el.clientHeight + 10));
+
+  // Scroll the viewport itself — that is the path a finger takes now that
+  // `.xterm-screen` is transparent to pointers, and xterm syncs its buffer from it.
+  await page.$eval(".xterm-viewport", (el) => { el.scrollTop = 0; });
+  await sleep(500);
+  ok("scrolling up offers the live view back", await jumpVisible());
+  await page.screenshot({ path: `${OUT}/mobile-jump-to-latest.png` });
+
+  ok("tapped it", await tapKey("Jump to latest output"));
+  await sleep(500);
+  ok("the viewport is back at the bottom",
+     await page.$eval(".xterm-viewport", (el) => el.scrollTop >= el.scrollHeight - el.clientHeight - 2));
+  ok("the button withdraws once there", !(await jumpVisible()));
+
+  // The other half of the scrolling fix: a touch has to reach the scrollable
+  // element at all. xterm paints `.xterm-screen` over the viewport, so it is made
+  // transparent to pointers on a coarse pointer — see index.css. The momentum
+  // itself is a real-handset check; this only pins the precondition.
+  ok("the screen is transparent to touch, so the viewport is what scrolls",
+     await page.$eval(".xterm-screen", (el) => getComputedStyle(el).pointerEvents === "none"));
+
+  // And the fallback if momentum does not hold: a thumb big enough to drag.
+  {
+    const thumb = await page.$('[data-testid="terminal-scrollbar-thumb"]');
+    ok("a drag thumb is drawn over the terminal", thumb !== null);
+    const box = await thumb.boundingBox();
+    ok("the thumb is big enough to grab", box.height >= 40 && box.width >= 10,
+       `${Math.round(box.width)}x${Math.round(box.height)}`);
+
+    const before = await page.$eval(".xterm-viewport", (el) => el.scrollTop);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 120, { steps: 10 });
+    await page.mouse.up();
+    await sleep(300);
+    const after = await page.$eval(".xterm-viewport", (el) => el.scrollTop);
+    ok("dragging the thumb scrolls the terminal", after < before, `${before} -> ${after}`);
+    await page.screenshot({ path: `${OUT}/mobile-scrollbar.png` });
+  }
+
+  await api(`/sessions/${raw.id}`, { method: "DELETE" });
+  await goBackToList();
+}
+
 console.log("\n=== no horizontal overflow at phone width ===");
 {
   const overflow = await page.evaluate(() =>

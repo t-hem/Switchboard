@@ -22,7 +22,7 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 | Three daemons, one killed mid-run, offline isolation, reorder, remove | `packages/web/acceptance/multi-host.mjs` |
 | `/config/agents` contract, drift → diff → sync, install hints, availability flip | `packages/web/acceptance/agent-sync.mjs` |
 | Takeover, 403 for a non-claimant, lockout banner, take-back | `packages/web/acceptance/claim.mjs` |
-| PWA assets, service worker, phone layout, quick-key byte sequences, Ctrl-C | `packages/web/acceptance/mobile.mjs` |
+| PWA assets, service worker, phone layout, quick-key byte sequences, Ctrl-C, jump-to-latest, the drag scrollbar | `packages/web/acceptance/mobile.mjs` |
 
 ---
 
@@ -104,6 +104,10 @@ known traps attached. Hand it to a session running on that machine.
 The three-host behaviour was proven with three daemons on one Linux box. What that
 *cannot* cover:
 
+**Blocked as of 2026-09-15:** every item here needs a second real machine, and
+`desktop-icu1edp` is throwing DPC watchdog errors. That box has to be healthy again
+before any of this, and before the remaining two Windows items in §1.
+
 - [ ] **A mixed-platform fleet.** Windows + Windows + Linux in one merged list.
 - [ ] **A genuinely powered-off machine.** This is a different code path from the
       simulated `SIGKILL`: a dead daemon refuses the connection instantly, while an
@@ -120,29 +124,41 @@ The three-host behaviour was proven with three daemons on one Linux box. What th
 
 ---
 
-## 3. `tailscale serve` — documented, never run
+## 3. `tailscale serve`
 
-Setup instructions are in the README. Untested on your tailnet.
+**Running on `tom-ai-machine` (Linux) since the first phone run, 2026-09-15.** The
+phone reaches the client and the daemon over it, so the setup in the README is
+confirmed on one machine. What is still open is the other machines' daemons.
 
-- [ ] **Each daemon is served over HTTPS**, not just the client:
-      `tailscale serve --bg --https=8443 7777`
-- [ ] **The client is served** from one machine:
-      `tailscale serve --bg --https=443 /abs/path/to/packages/web/dist`
-- [ ] **Mixed content is the trap.** A page loaded over `https://` cannot fetch
+- [x] **Each daemon is served over HTTPS**, not just the client:
+      `tailscale serve --bg --https=8443 7777`. Verified on the Linux box;
+      `tailscale serve status` shows `:8443 -> proxy http://127.0.0.1:7777`.
+- [x] **The client is served** from one machine:
+      `tailscale serve --bg --https=443 /abs/path/to/packages/web/dist`.
+- [x] **Mixed content is the trap.** A page loaded over `https://` cannot fetch
       `http://` or open `ws://` — browsers block it with no useful error. Serving the
       client over TLS while leaving daemons on plain `http://…:7777` produces an app
-      where *every host silently shows as offline*. If that is what you see, this is
-      why.
-- [ ] `tailscale serve status` shows what is exposed; `tailscale serve reset` undoes it.
-      Nothing should be on `funnel` — this is tailnet-only.
+      where *every host silently shows as offline*. Not hit, because the daemon is
+      proxied on `:8443` rather than addressed directly. It remains the first thing to
+      suspect if a host shows offline for no reason.
+- [x] `tailscale serve status` shows what is exposed; `tailscale serve reset` undoes it.
+      Nothing is on `funnel` — both entries read `(tailnet only)`.
+- [ ] **The same, on the other machines' daemons.** Only the Linux daemon is served;
+      a second host in the fleet needs its own `--https=8443` proxy before the phone
+      can reach it.
+
+Note that the client is served from `packages/web/dist`, so `npm run build -w
+@switchboard/web` publishes to the live URL immediately. There is no separate deploy
+step, and no staging copy.
 
 ---
 
 ## 4. The phone
 
 **First real handset run, 2026-09-15.** A live Claude Code session, driven from the
-phone, found three bugs that the emulated viewport in `mobile.mjs` could not. Two are
-fixed but not re-verified on the handset; the third is open.
+phone, found three bugs that the emulated viewport in `mobile.mjs` could not. Both of
+those fixes are now re-verified on the handset. The third — scrolling — has a fix
+since **2026-09-15** that no handset has touched.
 
 - **Send composed the line but never submitted it.** `MobileInputBar` sent
   `` `${line}\r` `` as one frame, so it reached the pty as a single read. A TUI that
@@ -155,10 +171,9 @@ fixed but not re-verified on the handset; the third is open.
   be changed at all — the prompt could only be escaped. All three keys are now in the
   row, and `mobile.mjs` asserts they are present.
 
-**Scrolling has no momentum, and that is a real bug — not yet fixed.** A drag moves the
-scrollback one-to-one and stops dead; there is no fling, and no acceleration on a faster
-drag. Scrolled up while output is streaming, there is no practical way back down to the
-live view.
+**Scrolling had no momentum. Three changes now address it; none is handset-verified.**
+A drag moved the scrollback one-to-one and stopped dead — no fling, no acceleration —
+and scrolled up while output streamed there was no practical way back to the live view.
 
 The cause is in xterm, confirmed by reading `node_modules/@xterm/xterm/lib/xterm.js`
 (5.5.0). `Viewport.handleTouchMove` sets `scrollTop += delta` by hand, and the
@@ -167,15 +182,29 @@ whenever that handler does not bubble — which is everywhere except the very to
 bottom of the buffer. So the browser's own touch scrolling, momentum included, is
 replaced by a 1:1 drag. There is no xterm option to turn this off.
 
-Two things worth knowing before attempting it:
+An earlier note here said stopping touch events at `.xterm-viewport` would be enough.
+**It is not, and on its own it does nothing:** xterm appends `.xterm-screen` *after*
+the viewport and gives it `position: relative`, so the screen paints on top and is
+what a finger actually lands on. Its scroll chain does not include the viewport, so a
+native scroll never starts. What shipped instead:
 
-- The viewport also registers a plain `scroll` listener (`Viewport._handleScroll`) that
-  syncs the buffer from `scrollTop`. Native scrolling therefore already drives xterm
-  correctly — it is only the touch handler that pre-empts it. Stopping touch events at
-  `.xterm-viewport` before they reach xterm's listener on the ancestor element should
-  hand scrolling back to the browser and restore momentum.
-- That is unverified and cannot be verified from Linux. A "jump to latest" affordance
-  is the cheaper fix for the actual pain and does not depend on any of it.
+- `.xterm-screen` is `pointer-events: none` under `@media (pointer: coarse)`, so a
+  touch reaches the viewport — the element that actually scrolls. The cost is touch
+  selection on the terminal, which does not work on a phone anyway.
+- `useTerminal.ts` stops `touchstart`/`touchmove` at the viewport, so they never reach
+  xterm's listener on the `.xterm` root and are never preventDefault()ed. The viewport
+  also registers a plain `scroll` listener (`Viewport._handleScroll`) that syncs the
+  buffer from `scrollTop`, so native scrolling already drives xterm correctly.
+- `TerminalScrollbar.tsx` draws a 44px-minimum drag thumb over the terminal, as the
+  fallback if momentum still does not hold. The viewport's own scrollbar could not be
+  widened for this: phones use overlay scrollbars, which ignore `::-webkit-scrollbar`
+  — measured at **0px** of layout width under mobile emulation, which is why that
+  approach was dropped.
+
+A **↓ Latest** button appears whenever the viewport is scrolled off the bottom and
+withdraws once it is back. `mobile.mjs` asserts the button's appear/tap/withdraw cycle,
+that the thumb is grabbable and that dragging it scrolls — but momentum itself cannot
+be tested from Linux, so only a handset can close this out.
 
 One further finding is **not** treated as a bug: typing directly into the terminal on a
 phone produces jumbled input. The soft keyboard drives xterm's hidden textarea through
@@ -183,15 +212,33 @@ IME composition, and autocorrect rewrites characters already sent to the pty. Th
 bar exists because that path does not work. If it is ever worth addressing, the fix is
 to focus the input bar when the terminal is tapped, not to repair raw typing.
 
-- [ ] **Re-verify the two fixes on the handset** — compose a line, tap Send once, and
-      see it submit; then answer a multi-select prompt using the quick keys alone.
-- [ ] **Scrolling**, once it is fixed — fling the scrollback, confirm momentum, and
-      confirm getting back to the live view is one gesture.
+- [x] **Send submits in one tap — re-verified on the handset, 2026-09-15.** An entire
+      working session was driven from the phone through the input bar, every line
+      submitting on a single Send. The two-writes-a-frame-apart fix holds against a
+      real soft keyboard.
+- [x] **Answer a multi-select prompt using the quick keys alone — re-verified on the
+      handset, 2026-09-15.** A four-option checkbox prompt from Claude Code itself was
+      answered from the phone with several options ticked, which takes `↓` to move and
+      Space to toggle. The dead end the first run hit is gone.
+- [ ] **Scrolling — the whole of the fix above is unverified on a handset.** Fling the
+      scrollback and confirm it carries rather than stopping dead; confirm a faster
+      drag goes further. Then scroll up and confirm **↓ Latest** appears and returns
+      you to the live view in one tap.
+- [ ] **The drag thumb.** Confirm it is visible whenever there is scrollback, that a
+      thumb can actually grab it, and that it is not so intrusive over the right-hand
+      column of the terminal that it should be hidden until first touch.
 - [ ] **Installs to the home screen** from the HTTPS origin and launches standalone.
 - [ ] **The couch test** (spec §1, the one-line test of success): from the phone,
       see that a Claude Code session on the Windows desktop is blocked on a permission
       prompt, tap it, answer with the quick-send buttons, and watch it continue —
       without SSH and without touching the desktop.
+
+      *Half-done, 2026-09-15.* A full working session — this checklist's own edits
+      among them — was driven from the phone against the **Linux** daemon over
+      `tailscale serve`, including answering prompts with the quick keys. What that
+      does not cover is the cross-machine half, which is the actual point. The Windows
+      box is throwing DPC watchdog errors and needs troubleshooting before it can host
+      the other end.
 
 That last one is the whole point of the project. Everything else is scaffolding for it.
 
