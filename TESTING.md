@@ -31,6 +31,10 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 Two bugs here were found by reading node-pty's source and fixed, but **no Windows
 code path has ever executed**. Assume this is where problems are.
 
+[`WINDOWS-SETUP.md`](./WINDOWS-SETUP.md) is the self-contained bring-up guide for the
+machine itself — prerequisites, `host.json`, `tailscale serve`, and this list with the
+known traps attached. Hand it to a session running on that machine.
+
 - [ ] **`npm install` builds `node-pty`.** Needs Visual Studio Build Tools with the
       "Desktop development with C++" workload. Nothing works until this does.
 - [ ] **Daemon starts.** `npm run dev:host`, then `curl http://localhost:7777/health`.

@@ -282,6 +282,10 @@ and the phone are **not yet verified**.
 **→ [TESTING.md](./TESTING.md)** is the checklist, ordered so the most likely blocker
 comes first. Start there before trusting any of this on a new machine.
 
+**→ [WINDOWS-SETUP.md](./WINDOWS-SETUP.md)** is the self-contained bring-up guide for
+a Windows machine joining the fleet — prerequisites, config, `tailscale serve`, and
+the Windows checklist with the known traps. Hand it to a session on that machine.
+
 ## Running the daemon from a clean shell
 
 Spawned agents inherit the daemon's environment, so the daemon should be started from
