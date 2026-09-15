@@ -55,8 +55,30 @@ export const win32Ops: ProcessOps = {
     }
   },
 
+  /**
+   * The orphan sweeper's kill, which has no pty handle to fall back on.
+   *
+   * A Windows console process cannot be asked politely to exit: `taskkill /T` without
+   * `/F` exits 255 with "This process can only be terminated forcefully (with /F
+   * option)", and every agent here is a console process. That refusal is the *expected*
+   * outcome of the graceful attempt, not a failure worth reporting — `killOrphan`
+   * treats a throw from the soft kill as terminal and returns `failed` without ever
+   * escalating, which made the whole graceful path unreachable on Windows: measured on
+   * Windows 10, every non-forced orphan kill reported failed while `/F` would have
+   * worked. Swallowing it lets the grace poll observe the process still alive and
+   * escalate, which is what actually kills it.
+   *
+   * The forced attempt still throws, because at that point there is no further step to
+   * try and its message is the only diagnostic the operator gets. Reporting `killed`
+   * remains gated on *observing* the death either way, so a swallowed error can never
+   * be mistaken for success.
+   */
   killByPid(pid, force) {
-    killTree(pid, force);
+    try {
+      killTree(pid, force);
+    } catch (err: unknown) {
+      if (force) throw err;
+    }
   },
 
   processIdentity(pid): ProcessIdentity | null {

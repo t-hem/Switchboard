@@ -29,11 +29,24 @@ after(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const isWindows = process.platform === "win32";
+
+/**
+ * A long-lived process to hang a ledger entry on. `sleep` is not a program on Windows
+ * (it is a PowerShell cmdlet), so spawning it there fails with ENOENT before any
+ * assertion runs; node itself is the one interpreter guaranteed to be present, since
+ * it is running this test.
+ */
 function spawnSleeper(): number {
   // detached so killing it never cascades, but deliberately NOT unref()'d: the
   // handle is what keeps the event loop alive while a test awaits its exit.
   // The after() hook kills anything still running.
-  const child = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
+  const child = isWindows
+    ? spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+        stdio: "ignore",
+        detached: true,
+      })
+    : spawn("sleep", ["30"], { stdio: "ignore", detached: true });
   children.push(child);
   assert.ok(child.pid, "child should have a pid");
   return child.pid;
@@ -186,14 +199,25 @@ test("killing an unknown id is reported, not thrown", async () => {
   assert.deepEqual(await ledger.killOrphans(["nope"]), [{ id: "nope", outcome: "unknown-session" }]);
 });
 
-test("a process that traps SIGTERM is escalated to SIGKILL, not assumed dead", async () => {
+test("a process that survives the graceful kill is escalated, not assumed dead", async () => {
   fs.rmSync(ledgerFile, { force: true });
   // Agent CLIs that trap signals to clean up are exactly the population that broke
   // this: the kill was reported as succeeding while the process kept running.
-  const child = spawn("bash", ["--norc", "--noprofile", "-c", "trap '' TERM; sleep 30"], {
-    stdio: "ignore",
-    detached: true,
-  });
+  //
+  // What "ignores the polite kill" means is platform-specific. On POSIX it takes a
+  // deliberate `trap '' TERM`. On Windows every console process is already in that
+  // population for free: `taskkill /T` without `/F` refuses with "can only be
+  // terminated forcefully", so an ordinary node process exercises the same escalation
+  // without needing a shell that isn't there.
+  const child = isWindows
+    ? spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+        stdio: "ignore",
+        detached: true,
+      })
+    : spawn("bash", ["--norc", "--noprofile", "-c", "trap '' TERM; sleep 30"], {
+        stdio: "ignore",
+        detached: true,
+      });
   children.push(child);
   await sleep(300);
   const pid = child.pid!;
@@ -208,7 +232,13 @@ test("a process that traps SIGTERM is escalated to SIGKILL, not assumed dead", a
   assert.deepEqual(ledger.orphans, []);
 });
 
-test("an unkillable process is reported as failed and keeps its ledger entry", async () => {
+test("an unkillable process is reported as failed and keeps its ledger entry", {
+  // Windows has no zombies and no process that survives `taskkill /F`, so the case
+  // cannot be staged with a real process here. It is not left untested: the same
+  // invariant — a kill that cannot be confirmed reports `failed` and KEEPS the entry —
+  // is driven against a fake ProcessOps in escalation.test.ts, which runs on every OS.
+  skip: isWindows ? "no real process on Windows survives taskkill /F; see escalation.test.ts" : false,
+}, async () => {
   fs.rmSync(ledgerFile, { force: true });
   // A zombie is the one thing signals cannot clear: it still has a /proc entry with
   // an unchanged start time, so it is indistinguishable from a survivor.

@@ -69,6 +69,25 @@ test("windows kill survives taskkill being unavailable or refusing", () => {
   assert.equal(pty.calls.length, 1, "the pty handle is still released");
 });
 
+test("windows swallows a refused graceful kill so the escalation is still reached", () => {
+  // A Windows console process cannot be closed politely: taskkill without /F exits 255
+  // with "can only be terminated forcefully", and every agent is a console process.
+  // killOrphan treats a throw from the soft kill as terminal and returns `failed`
+  // without escalating, so letting that refusal propagate made the graceful path
+  // unreachable on Windows — measured there, every non-forced orphan kill reported
+  // failed while /F would have worked.
+  //
+  // pid 0 is never a real process, and taskkill does not exist off Windows: either way
+  // the call below fails internally, which is exactly the condition being swallowed.
+  assert.doesNotThrow(() => win32Ops.killByPid(0, false));
+});
+
+test("windows lets a failed forced kill surface, since nothing follows it", () => {
+  // The escalation is the last step, so its error is the only diagnostic the operator
+  // gets. Reporting `killed` stays gated on observing the death either way.
+  assert.throws(() => win32Ops.killByPid(0, true));
+});
+
 test("windows kill still releases the pty handle when pty.kill throws", () => {
   const exploding = {
     kill() {
