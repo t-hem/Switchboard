@@ -12,9 +12,9 @@ A second agent joined on 2026-09-16. Until then everything was committed directl
 to directly.
 
 - Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
-  **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6) and
-  **`step7a-personas-tools`** (step 7a), each stacked on the previous. All push to
-  `origin`.
+  **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6),
+  **`step7a-personas-tools`** (step 7a) and **`step7b-tailoring-runner`** (step 7b),
+  each stacked on the previous. All push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -57,7 +57,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–7a
+## Jobs stages 2–7b
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -91,6 +91,15 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   and read-only `GET /api/personas`. **Read [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)
   for exactly what the real personas/tools still need** — especially the tool bridge,
   which does not exist yet, so the tools are not yet enforceable against a live model.
+- **Step 7b** (verified, on branch `step7b-tailoring-runner`): the two-pass workflow.
+  `TailoringRunner` creates tracked `agent_runs`, snapshots the persona before spawn,
+  writes a `0700` run dir + task file, passes argv via the host's literal `extraArgs`,
+  polls retained exit state to a deadline (stopping the owned session on timeout),
+  validates the result against the run's exact revisions, persists the build and edit
+  resume versions (parent link + edit diff) and opens a review item. `POST /api/tailoring`
+  triggers the two passes; `GET /api/runs/:id` reads one run; both need a private
+  `spawnerToken` in `service.json`. Fake-agent tests cover valid, malformed, missing,
+  changed-input, unsupported-fact, nonzero-exit, lost and hung runs.
 - **Step 6** (verified, on branch `step6-resume-library`, commit `6ba9806`): immutable career-library
   revisions (profile facts separated from suggestions, bullets, base templates with
   bullet slots), deterministic and explainable bullet selection, structured text
@@ -122,6 +131,10 @@ Step 7a verification (Node 22.23.2, Linux): jobs build/typecheck and 57 jobs tes
 passed; root typecheck and 74 host tests passed. `node packages/jobs/acceptance/personas.mjs`
 passed; `library.mjs`, `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass.
 
+Step 7b verification (Node 22.23.2, Linux): jobs build/typecheck and 64 jobs tests
+passed; root typecheck and 74 host tests passed. `personas.mjs`, `library.mjs`,
+`capture.mjs`, `scaffold.mjs` and `dashboard.mjs` all still pass.
+
 Commands (Node 22 on PATH):
 
 ```sh
@@ -146,17 +159,20 @@ The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harnes
 attempt supplied the printed Promise instead of the path, which was fixed. The browser
 harness explicitly focuses tabs before clicking.
 
-## Next: step 7b then 7c — two-pass workflow, then spawner recovery
+## Next: step 7c — spawner idempotency and restart recovery
 
-**7b** wires the two required passes: an assembly run that calls the scoped tools and a
-separate edit run over the assembled resume, both saved with their own structured result,
-`tool_events`/`run_messages`, the diff between assembly and edit, and human decisions.
-**7c** adds the host-side idempotency/recovery contract (intent recorded before spawn,
-rediscovery after timeout, reconnect instead of re-spawn) and the linked-retry behaviour.
+**7c** closes the spawn-response-loss window and adds recovery. Concretely: record spawn
+intent before creating a session, add a generic optional idempotency key to the host's
+`POST /sessions` (or prove an equivalent atomic lookup), persist recoverable session
+metadata, rediscover the same session after a timeout instead of spawning twice, poll
+retained exit state after a restart, reject late results from a superseded attempt, and
+prove `jobs` service kill/restart and host restart recover exactly one run.
 
-Both must keep the operator's placeholder decision in mind: personas and tools are
-placeholders, the model is `openrouter/deepseek/deepseek-v4.1-flash`, and the **tool
-bridge** plus the verified CLI JSON envelope are prerequisites for any real smoke
+This is the first stage that changes the **host daemon**, so it needs the host unit
+tests plus the restart acceptance (`packages/host/acceptance/restart.mjs`). The operator's
+placeholder decision still applies: personas/tools are placeholders, the model is
+`openrouter/deepseek/deepseek-v4.1-flash`, and the **tool bridge** plus the verified CLI
+JSON envelope are prerequisites for any real smoke
 (see [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)).
 
 Still outstanding from earlier stages, deliberately: no live board smoke test, no

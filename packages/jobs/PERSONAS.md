@@ -107,3 +107,22 @@ npm --prefix packages/jobs run build
 node --test --import tsx packages/jobs/test/personas.test.ts packages/jobs/test/tools.test.ts
 node packages/jobs/acceptance/personas.mjs
 ```
+## Runner status (step 7b)
+
+`src/runner.ts` now creates tracked agent runs, passes the invocation argv through the
+host's literal `extraArgs`, polls retained exit state, validates the result against the
+run's exact revisions and persists the build/edit resume versions plus tool events,
+messages and a review item. `POST /api/tailoring` triggers the two passes in the
+background; `GET /api/runs/:id` shows one run. Both require a private `spawnerToken` in
+`service.json` (the host token); without it the route reports `spawner_unconfigured`.
+
+**The remaining blocker for a real run is still item 4 above — the tool bridge.** The
+runner sends `--tools <ids>` and an optional `--extension <bridge>`, but no bridge file
+exists yet, so a real `pi` process has nothing to execute the tools against. Until that
+exists:
+- the assembly pass cannot call `list_templates`/`select_bullet`/…, and
+- a prompt-only tool list must not be described as an enforced restriction.
+
+Also still unverified: the exact `--mode json` envelope, and any real end-to-end run.
+Fake agents (tests) prove the workflow, validation and failure handling; they do not
+prove real model behaviour.

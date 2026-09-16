@@ -7,6 +7,8 @@ export type ServiceConfig = {
   port:number; token:string; allowedOrigins:string[];
   /** Optional machine-local browser for posting capture; absent means URL capture stays unavailable. */
   browserExecutablePath?:string;
+  /** Private host bearer token used to spawn agent sessions; never returned to clients. */
+  spawnerToken?:string;
   /** Only the isolated local development fixture may enable private/loopback import targets. */
   allowPrivateImport?:boolean;
 };
@@ -28,5 +30,7 @@ export function loadServiceConfig(): {dir:string; config:ServiceConfig} {
     throw new Error("Invalid service.json: browserExecutablePath must be an absolute path");
   if (value.allowPrivateImport !== undefined && typeof value.allowPrivateImport !== "boolean")
     throw new Error("Invalid service.json: allowPrivateImport must be a boolean");
+  if (value.spawnerToken !== undefined && (typeof value.spawnerToken !== "string" || value.spawnerToken.length < 8))
+    throw new Error("Invalid service.json: spawnerToken must be the host token (8+ characters)");
   return {dir,config:value};
 }

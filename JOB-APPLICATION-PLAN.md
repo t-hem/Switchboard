@@ -1222,3 +1222,51 @@ Approved to proceed; see implementation entries below.
   `tools.ts` to a real agent process; confirming the CLI JSON envelope; any real model
   run; the two-pass workflow and decision logging (7b); spawner idempotency/host
   recovery (7c). A prompt-only tool list is **not** claimed as an enforced restriction.
+
+### 2026-09-16 — step 7b complete (two-pass workflow and decision logging)
+
+- Step 7a committed/pushed on branch `step7a-personas-tools` as `05ac552`
+  (`feat(jobs): load personas and expose scoped tailoring tools`). This checkpoint's
+  commit is the branch head of `step7b-tailoring-runner`, stacked on 7a.
+- `adapters/spawner.ts` grows an optional control surface (`create`, `stop`) with an
+  explicit `requireSpawnerControl` check, so a caller learns a spawner cannot create
+  rather than pretending. `SwitchboardSpawner.create` posts literal argv as `extraArgs`
+  with a `jobs:<application>:tailor:<stage>:<run>` label; `stop` issues `DELETE`.
+  Creation has **no host idempotency key yet**, so a stage is never automatically
+  retried — that window is closed in 7c.
+- `runner.ts` implements `TailoringRunner`. Each stage:
+  1. enqueues a task (audit + retry budget), creates a `0700` run directory and writes
+     an immutable task file (persona + skills + task, including the jobs-owned result
+     path and the untrusted posting text);
+  2. snapshots the persona into `agent_runs` (persona text, skills, composed prompt,
+     agent, model, tools, permissions, revision hashes) before any spawn;
+  3. builds argv through the invocation adapter and creates a labelled session;
+  4. polls retained exit state to a deadline, stopping the owned session on timeout;
+  5. reads and validates the result file, then persists a resume version
+     (`phase='build'` for assembly, `'edit'` for the edit pass, linked by
+     `agent_run_id`/`parent_resume_id` with the edit diff and proposed patches in
+     `edits_json`), records `tool_events`/`run_messages`, and opens a durable review item.
+  A successful exit with no valid output artifact is a **failed** stage. Failures
+  (missing output, malformed JSON, changed inputs, unsupported bullet revision, nonzero
+  exit, lost session, hung run) mark the run `lost` and the task `failed`; no resume
+  version is written.
+- Validation is strict: the model may not change the run's snapshot/profile/template
+  revisions, must name a candidate, and every `selectedBullet.revisionId` must be an
+  approved revision of the run's profile — an invented bullet is rejected as
+  `unsupported_fact`.
+- `resume.persist` now takes `phase`, `agentRunId`, `parentResumeId` and `edits`, and
+  de-duplicates per phase, so deterministic renders, model builds and model edits are
+  distinct immutable versions.
+- `runner-api.ts` adds operator-triggered `POST /api/tailoring` (fire-and-forget
+  two-pass; status via `agent_runs`/review items) and read-only `GET /api/runs/:id`
+  (run, tool events, messages, resume versions). The runner is built lazily and only
+  when a private `spawnerToken` is present in `service.json`; without it the route
+  returns 409 `spawner_unconfigured` instead of attempting a spawn.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 64 jobs tests (7 new runner
+  tests with fake agents covering a valid assembly, the full two-pass with diff, and
+  missing/malformed/changed-input/nonzero/lost/hung failures) and 74 host tests; root
+  typecheck. `personas.mjs`, `library.mjs`, `capture.mjs`, `scaffold.mjs` and
+  `dashboard.mjs` all still pass.
+- Not done here: the host-side idempotency/reconnect contract and restart recovery
+  (7c), the tool bridge and a real-agent smoke (see PERSONAS.md), and any scheduling or
+  UI trigger for tailoring (step 8).

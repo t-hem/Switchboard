@@ -33,6 +33,12 @@ downloaded or started at install time. `allowPrivateImport` defaults to **false*
 refuses loopback/private/link-local targets for both fetching and browser navigation;
 only an isolated local fixture should set it true.
 
+`spawnerToken` is the **host** bearer token, kept only in this private file. It is
+required for tailoring: `POST /api/tailoring` spawns agent sessions through the host
+and `GET /api/runs/:id` reads a run. Without it those routes return 409
+`spawner_unconfigured`. The token is never returned to a client and never enters
+settings or exports.
+
 The jobs service works with Switchboard stopped. Its scheduler shell performs no
 network calls and starts no processes. Spawner observation is an injected interface;
 creation, durable attempt fencing and model invocation land with step 7's worker.
@@ -197,6 +203,15 @@ bridge** that exposes `src/tools.ts` to an agent process. Until that bridge exis
 model cannot call the tools, and a prompt-only tool list is not an enforced restriction.
 Placeholders ship in `packages/jobs/personas/`; the live copies are machine-local under
 `~/.switchboard/personas/` and are never fleet-synced.
+
+`src/runner.ts` performs the two passes: it snapshots the persona into `agent_runs`,
+writes a `0700` run directory and task file, passes the invocation argv through the
+host's literal `extraArgs`, polls retained exit state to a deadline, validates the
+result against the run's exact snapshot/profile/template revisions, and saves the
+build and edit resume versions with their tool events, messages and a durable review
+item. A successful exit without a valid result artifact is a failed stage. Failure
+modes (missing/malformed output, changed inputs, unsupported bullet, nonzero exit, lost
+or hung session) are covered by fake-agent tests.
 
 ```sh
 node packages/jobs/acceptance/personas.mjs

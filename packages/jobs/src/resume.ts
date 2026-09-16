@@ -133,14 +133,19 @@ export class ResumeRenderer {
     return this.persist({ ...input, profileId: profile.id, templateId: template.id, ...built });
   }
 
-  /** Stores an explicit selection (model or operator) as an immutable render version. */
-  persist(input: { jobSnapshotId: string; profileId: string; templateId: string; structured: StructuredResume; selectedBullets: SelectedBullet[]; text: string }): RenderedResume {
+  /**
+   * Stores an explicit selection as an immutable resume version. `phase` distinguishes a
+   * deterministic render from a model build/edit pass; `agentRunId` links it to the run.
+   */
+  persist(input: { jobSnapshotId: string; profileId: string; templateId: string; structured: StructuredResume; selectedBullets: SelectedBullet[]; text: string;
+    phase?: "build" | "edit" | "render"; agentRunId?: string | null; parentResumeId?: string | null; edits?: unknown }): RenderedResume {
     const { structured, selectedBullets, text } = input;
+    const phase = input.phase ?? "render";
     return transaction(this.db, () => {
       const sourceJson = JSON.stringify(structured), selectedJson = JSON.stringify(selectedBullets);
       const existing = this.db.prepare(`SELECT id,text_artifact_hash FROM resume_versions
-        WHERE job_snapshot_id=? AND profile_revision_id=? AND template_revision_id=? AND phase='render' AND source_json=? AND selected_bullets_json=?`)
-        .get(input.jobSnapshotId, input.profileId, input.templateId, sourceJson, selectedJson) as Record<string, unknown> | undefined;
+        WHERE job_snapshot_id=? AND profile_revision_id=? AND template_revision_id=? AND phase=? AND source_json=? AND selected_bullets_json=?`)
+        .get(input.jobSnapshotId, input.profileId, input.templateId, phase, sourceJson, selectedJson) as Record<string, unknown> | undefined;
       if (existing) {
         const hash = String(existing["text_artifact_hash"]);
         return { resumeVersionId: String(existing["id"]), textArtifactHash: hash, text: Buffer.from(this.artifacts.read(hash)).toString("utf8"), structured, selectedBullets, created: false };
@@ -149,8 +154,10 @@ export class ResumeRenderer {
       const id = randomUUID();
       this.db.prepare(`INSERT INTO resume_versions(id,job_snapshot_id,profile_revision_id,template_revision_id,parent_resume_id,agent_run_id,
         phase,source_json,selected_bullets_json,edits_json,text_artifact_hash,pdf_artifact_hash,created_at)
-        VALUES(?,?,?,?,NULL,NULL,'render',?,?,'{}',?,NULL,?)`).run(id, input.jobSnapshotId, input.profileId, input.templateId, sourceJson, selectedJson, textArtifactHash, new Date(this.now()).toISOString());
-      event(this.db, "resume.rendered", "resume", id, { jobSnapshotId: input.jobSnapshotId, profileRevisionId: input.profileId, templateRevisionId: input.templateId, missing: structured.missing }, this.now());
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,NULL,?)`).run(id, input.jobSnapshotId, input.profileId, input.templateId,
+        input.parentResumeId ?? null, input.agentRunId ?? null, phase, sourceJson, selectedJson,
+        JSON.stringify(input.edits ?? {}), textArtifactHash, new Date(this.now()).toISOString());
+      event(this.db, "resume.rendered", "resume", id, { jobSnapshotId: input.jobSnapshotId, profileRevisionId: input.profileId, templateRevisionId: input.templateId, phase, missing: structured.missing }, this.now());
       return { resumeVersionId: id, textArtifactHash, text, structured, selectedBullets, created: true };
     });
   }

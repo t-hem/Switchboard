@@ -3,6 +3,7 @@ import { dashboardRoutes } from "./dashboard.js";
 import { postingsRoutes, type PostingsDeps } from "./postings-api.js";
 import { libraryRoutes } from "./library-api.js";
 import { personasRoutes } from "./personas-api.js";
+import { runnerRoutes } from "./runner-api.js";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
@@ -54,6 +55,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   postingsRoutes(app,store,dir,config,options.deps);
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
+  runnerRoutes(app,store,dir,config);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{
       const file=new URL(name,uiDir);

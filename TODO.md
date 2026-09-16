@@ -5,17 +5,20 @@ verified and deployed, including a real coding-agent self-restart. Jobs steps 2â
 complete and verified on Linux: isolated scaffold, persistence, dashboard/review UI,
 posting import/capture with archived evidence, and the versioned career library with
 bullet-based structured resume rendering (PDF deferred by operator decision). Step 7a
-(persona loading/validation, scoped tools and invocation contract) is complete with
-**placeholder** personas/tools at model `openrouter/deepseek/deepseek-v4.1-flash`; step
-7b (two-pass workflow and decisions) is next, then 7c (spawner recovery) and 8.
+(persona loading/validation, scoped tools and invocation contract) and 7b (the two-pass
+runner with tracked runs, result validation, resume versions and review items) are
+complete with **placeholder** personas/tools at model
+`openrouter/deepseek/deepseek-v4.1-flash`. Step 7c (host spawner idempotency and
+restart recovery) is next, then 8.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.
 
 Stage work happens on branches (a second agent joined; master previously held all
 commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
-`step6-resume-library`, `step7a-personas-tools`, each stacked on the previous. Do not
-work directly on master; merge a verified stage branch when it is reviewable.
+`step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`, each
+stacked on the previous. Do not work directly on master; merge a verified stage branch
+when it is reviewable.
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 
