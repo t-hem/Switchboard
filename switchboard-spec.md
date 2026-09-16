@@ -329,7 +329,13 @@ Responsive layout, line-input bar, quick-send button row, PWA manifest and servi
 
 Unlike §2, these are not exclusions. They are the next things, written down so they get built deliberately rather than improvised into the daemon under pressure. Nothing here is started without a decision to start it.
 
-- **tmux-backed sessions.** If daemon restarts killing sessions becomes irritating, wrap each PTY in `tmux new-session -d -s sw-<id>` on Linux and attach to it, so the daemon can re-discover and reattach on boot. Windows has no equivalent, so this would make the two platforms diverge. Revisit only if the pain is real.
+- **tmux-backed sessions.** Wrap each PTY in `tmux new-session -d -s sw-<id>` on Linux and attach to it, so the daemon can re-discover and reattach rather than owning the processes. This was deferred with "revisit only if the pain is real," and as of 2026-09-15 two of the three conditions behind that have changed:
+
+  **The pain is real, and it is specific.** An agent session can edit the daemon, test it against a throwaway daemon on another port, and commit — but it cannot make *the daemon it is running inside* become the new code, because the restart that would load it is the thing that kills it. That is tolerable for a tool used a few times a month and much less so once a pipeline is spawning sessions that work on this repo.
+
+  **The platform divergence is cheaper than it was.** Process lifecycle already lives behind `ProcessOps` with one implementation per platform (see the engineering constraints), so a Linux-only session backend has somewhere to go that is not an `if` in the middle of shared code. Windows would keep today's behaviour: a restart ends its sessions.
+
+  What has *not* changed is that this is the largest single increase in moving parts the daemon could take on — session discovery, reattachment, tmux's own failure modes, and a second source of truth about what is running alongside the ledger. Treat "restart between tasks" as the baseline it is competing against, not as a problem that obviously needs solving.
 
 - **Idle push notifications.** The amber "waiting for input" state is exactly the signal worth pushing. An `ntfy` or Telegram POST when a session crosses the idle threshold would mean not having to check at all. Small addition once §5.2 exists. Note that this is the same need as a pipeline's "tell me where it got stuck" — one mechanism should serve both.
 
