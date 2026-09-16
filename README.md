@@ -418,3 +418,11 @@ an independently supervised tmux owner and per-session systemd user scopes. See
 [LINUX-SESSIONS.md](LINUX-SESSIONS.md) for configuration, display guarantees and offline
 recovery, and [JOB-APPLICATION-PLAN.md](JOB-APPLICATION-PLAN.md) for rollout status.
 The default/direct backend and Windows still terminate sessions during shutdown.
+
+## Optional jobs application
+
+The Linux-only jobs app is a separate package and service, disabled by default.
+It currently provides versioned settings and a standalone editor; search, agent work
+and applications are not implemented yet. Root/core installation remains independent.
+See [packages/jobs/README.md](packages/jobs/README.md) for opt-in setup and
+[packages/jobs/DATABASE.md](packages/jobs/DATABASE.md) for the actual schema.

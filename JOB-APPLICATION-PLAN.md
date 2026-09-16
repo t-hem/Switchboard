@@ -972,3 +972,34 @@ Approved to proceed; see implementation entries below.
   viewport is not a physical phone test. Windows direct behavior is exercised by fakes
   and the Linux direct regression. Hardware checks remain follow-ups, not a gate on
   the independent jobs scaffold. No jobs or review-loop logic added to the daemon.
+
+### 2026-09-16 — step 2 complete
+
+- Step 1d committed/pushed as `dc0a5af`; final recovery changes deployed to the host.
+- Added independent packages/jobs and packages/jobs-ui, strict authenticated settings/
+  status API, disabled scheduler shell, SQLite settings revision/conflict handling and
+  standalone mobile-friendly structured settings editor with import/export.
+- Packaging clarification: optional apps have their own installs/lockfiles, not root
+  npm workspaces. Root workspaces would install jobs dependencies for every normal
+  Switchboard/Windows install, contradicting the isolation requirement. Root jobs:*
+  scripts provide explicit opt-in setup/build/test/start. No host/web imports changed.
+- Persistence clarification: settings use SQLite immediately (schema 1), avoiding a
+  second JSON settings authority before step 3. Bootstrap port/token/allowed origins
+  remain private machine-local service configuration; richer connections controls are
+  step 4. Every current workflow setting is editable in the structured client now.
+- Contracts grow with callers: the step-2 AgentSpawner covers health/list/inspect and
+  is tested identically against a fixture-backed Switchboard adapter and a fake alternate.
+  Creation, ambiguous outcomes and attempt fencing are explicitly deferred to step 7;
+  no claim of idempotent host POST /sessions is made by this scaffold.
+- Dependencies pinned separately: Node 22.23.2 baseline (runtime 22.23.x), built-in
+  SQLite 3.51.3, Fastify 5.12.4 and puppeteer-core 25.11.0 (future capture/PDF; no browser
+  installation/start). Full implemented column/settings documentation: packages/jobs/
+  DATABASE.md. Runtime/contracts: packages/jobs/README.md. Checkpoint: IMPLEMENTATION-HANDOFF.md.
+- Verification passed: jobs build/typecheck, seven scaffold tests, standalone HTTP and
+  Chromium mobile-viewport acceptance, root typecheck, fresh isolated core-only Linux
+  npm install/build and Windows dependency-resolution dry run. Existing 69 host tests
+  passed after the last host changes. No claim of actual Windows hardware validation.
+- Browser harness fixes: executablePath is asynchronous in pinned Puppeteer; background
+  tabs needed explicit focus for clicks. Both corrected and acceptance rerun successfully.
+- No live source crawling, applicant imports, notifications, browser jobs, child agents
+  or applications were dispatched. Jobs service not yet installed as a live service.

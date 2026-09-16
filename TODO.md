@@ -1,8 +1,9 @@
 # TODO
 
 Implementation status (2026-09-16): Linux recovery steps 1a–1d are implemented,
-verified and deployed, including a real coding-agent self-restart. Step 2 is next.
-See JOB-APPLICATION-PLAN.md for the staged log. Jobs/review-loop work has not started.
+verified and deployed, including a real coding-agent self-restart. Step 2 (isolated jobs scaffold) is complete; step 3 persistence is next.
+See JOB-APPLICATION-PLAN.md for the staged log. Jobs scaffold is implemented and verified; review-loop implementation has not started.
+See IMPLEMENTATION-HANDOFF.md and packages/jobs/DATABASE.md for current code/schema details.
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 
