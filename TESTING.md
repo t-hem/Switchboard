@@ -1,10 +1,14 @@
 # What still needs testing
 
-Everything built so far was verified on **Linux only**, by automated suites that
-drive real daemons, real PTYs and a real browser. This file is the handoff: what is
-already proven, what is not, and exactly how to check the rest.
+The automated suites drive real daemons, real PTYs and a real browser, and they run
+on Linux. Beyond them, as of 2026-09-15: the Linux daemon runs under systemd and
+serves the fleet, the phone and desktop clients have both been used by hand and the
+faults that found are fixed, and the Windows daemon has had two real runs. What has
+*not* happened is a full multi-machine fleet under load, and the Windows box is out
+of action with unrelated hardware faults.
 
-Work top to bottom — it is ordered so the most likely blocker comes first.
+This file is the handoff: what is proven, what is not, and exactly how to check the
+rest. Work top to bottom — it is ordered so the most likely blocker comes first.
 
 ---
 

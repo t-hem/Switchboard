@@ -37,9 +37,11 @@ not been exercised on real hardware yet.
 
 ## Requirements
 
-- **Node 22+.** `node-pty` is built from source on install, so a C++ toolchain is
-  needed (`build-essential` + `python3` on Linux, Xcode CLT on macOS, VS Build Tools
-  on Windows).
+- **Node 22+.** `node-pty` ships prebuilt binaries for Windows and macOS and falls
+  back to compiling, so a C++ toolchain is needed on Linux (`build-essential` +
+  `python3`) but **not** on Windows — verified on a bare Windows 10 machine, where
+  `npm install` never invoked node-gyp. Only install VS Build Tools if an install
+  actually falls through to a compile.
 - Agent CLIs are installed per machine. A configured-but-missing agent is a normal
   state — it shows as unavailable rather than breaking startup.
 
@@ -273,7 +275,8 @@ which this does not use.
 
 Open the HTTPS URL and use *Add to Home Screen*. The app then launches standalone,
 and the terminal view gets a line-input bar pinned above the keyboard plus quick-send
-buttons for `y`, `n`, `Esc`, `Ctrl-C`, `↑` and `Enter` — permission prompts and menu
+buttons for `y`, `n`, `Esc`, `Ctrl-C`, `↑`, `↓`, Space, Tab and `Enter` — permission
+prompts and menu
 selections are the overwhelming majority of phone interactions, and a raw terminal
 against a soft keyboard is miserable for both.
 
@@ -374,8 +377,10 @@ packages/host   Node 22 + TypeScript daemon (Fastify, node-pty)
   src/registry.ts     agents map + availability, reloadable in place
   src/ringbuffer.ts   fixed-size scrollback
   src/sessions.ts     PTY lifecycle, subscribers, kill escalation
-  src/ledger.ts       orphan bookkeeping with the PID-reuse guard
-  src/proc.ts         process identity and liveness, per platform
+  src/ledger.ts       orphan bookkeeping with the PID-reuse guard (takes a ProcessOps)
+  src/ptybytes.ts     normalise an onData chunk to bytes (Windows hands over strings)
+  src/platform/       ProcessOps: spawn argv, kill a pty, kill by pid, process identity
+    posix.ts win32.ts   one implementation each, chosen once at load
   src/server.ts       REST + WebSocket
   acceptance/         harnesses for the manual acceptance steps
 

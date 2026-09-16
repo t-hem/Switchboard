@@ -90,11 +90,15 @@ The web client is a static bundle. Any host can serve it; it holds its own list 
   "token": "<generated on first run, printed to stdout once>",
   "hostLabel": "desktop1",
   "scrollbackBytes": 262144,
-  "workspaceRoots": ["C:\\dev", "C:\\projects"]
+  "workspaceRoots": ["C:\\dev", "C:\\projects"],
+  "pathPrepend": [],
+  "env": {}
 }
 ```
 
 The token is per-host and must never be transmitted to another host or included in any sync payload. `workspaceRoots` is machine-specific by nature — Windows drive paths are meaningless on the Linux box.
+
+`pathPrepend` (directories put in front of `PATH`) and `env` (extra variables) define the environment agents are both **probed** and **spawned** with, so availability can never disagree with what actually launches. They are here rather than in `agents.json` because they are machine-specific: npm global installs live under the *active* Node version's bin directory, so a daemon on Node 22 cannot see CLIs installed under Node 20. The fix is a `pathPrepend` entry on that machine — never an absolute `cmd` in `agents.json`, which is synced to every host and would then be wrong on all the others.
 
 **`agents.json`** — shared across all hosts, synced by the client:
 
@@ -151,7 +155,7 @@ All routes except `/health` require `Authorization: Bearer <token>`. Reject with
 |---|---|---|
 | `GET` | `/health` | `{ hostLabel, platform, version, agents: [{name, available}], sessionCount }`. **No auth** — used by the client to show a host as reachable-but-unauthorized vs offline. |
 | `GET` | `/sessions` | `Session[]` for this host. |
-| `POST` | `/sessions` | Body `{ agent, cwd, cols?, rows?, extraArgs?: string[] }`. Validates that `agent` exists and is available and that `cwd` is an existing directory. Spawns the PTY. Returns the `Session`. |
+| `POST` | `/sessions` | Body `{ agent, cwd, cols?, rows?, extraArgs?: string[], label? }`. Validates that `agent` exists and is available and that `cwd` is an existing directory. Spawns the PTY. Returns the `Session`. |
 | `GET` | `/sessions/:id` | Single `Session`. 404 if unknown. |
 | `DELETE` | `/sessions/:id` | SIGTERM the PTY, then SIGKILL after 3s if still alive. Removes from the map. Returns 204. |
 | `GET` | `/workspaces` | `string[]` of candidate directories from `workspaceRoots`. |
@@ -218,12 +222,14 @@ Clicking a session opens an xterm.js pane bound to that host's WS endpoint. Requ
 - Reconnect with exponential backoff on socket close, up to ~30s, unless the close was an `evicted` control message (then show the takeover banner and stop retrying).
 - A visible connection state indicator: connected / reconnecting / evicted / session exited.
 
-**Desktop layout:** session list in a left sidebar, terminal filling the rest. Keep the sidebar visible — switching between machines should be one click.
+**Desktop layout:** session list in a left sidebar, terminal filling the rest. The sidebar is visible by default — switching between machines should be one click. It can be collapsed with a `☰`, which persists per device; the requirement is that nothing *forces* the list out of view, not that it can never be dismissed.
 
 **Mobile layout:** full-screen list, tap into a full-screen terminal with a back button. Two things that are not optional on mobile:
 
-1. **A line-input bar pinned above the keyboard.** A text field plus a send button that transmits the typed text followed by `\r`. Mobile soft keyboards against a raw terminal are miserable; this bar is how the phone case actually works.
-2. **A row of quick-send buttons** next to it: `y`, `n`, `Esc`, `Ctrl-C`, `↑`, `Enter`. Permission prompts and menu selections are the overwhelming majority of phone interactions.
+1. **A line-input bar pinned above the keyboard.** A text field plus a send button that transmits the typed text and then its `\r`. Mobile soft keyboards against a raw terminal are miserable; this bar is how the phone case actually works.
+
+   The line and the return must not arrive in one read. A TUI that reads stdin in bursts treats a multi-character read as *pasted* text, so the `\r` is inserted into the composer as a newline instead of submitting — the line lands and simply sits there. Sending the return only once the agent has produced output, which is proof it read the line, is what makes it register as a keypress. A fixed delay is not enough: it is a race that a busy agent loses.
+2. **A row of quick-send buttons** next to it: `y`, `n`, `Esc`, `Ctrl-C`, `↑`, `↓`, Space, Tab, `Enter`. Permission prompts and menu selections are the overwhelming majority of phone interactions. Both arrows, Space and Tab are needed together for a multi-select prompt — arrows move, Space toggles, Tab moves between questions, Enter commits — and without them such a prompt cannot be answered from a phone at all.
 
 Register a PWA manifest and a minimal service worker so it installs to the home screen. `tailscale serve` supplies the HTTPS origin that installability requires.
 
