@@ -32,8 +32,20 @@ not. Spec §2's exclusions ("no database", "no persistence", "no pipelines") sco
 | 4 | Client lock / takeover | done |
 | 5 | Mobile polish, PWA, `tailscale serve` | done |
 
-"Done" means built and verified on Linux. See [TESTING.md](./TESTING.md) for what has
-not been exercised on real hardware yet.
+**First pass complete, 2026-09-15.** All six phases are built, and the thing the spec
+set out to do works: a session running on the Linux box can be driven from a phone on
+the tailnet, and from a desktop browser, over HTTPS, with the daemon coming up by
+itself at boot.
+
+What that pass cost, beyond the phases themselves: four Windows bugs (two found by
+reading node-pty's source, two by running it), a pty that kept the phone's width when
+opened on a desktop, `Ctrl-Z` silently stranding sessions with no shell to resume
+them, clipboard chords going to the pty as control bytes, and single-click kills with
+no confirmation.
+
+Still open: a full multi-machine fleet under load — the Windows box is out with
+unrelated hardware faults — and one low-priority rendering defect. See
+[TESTING.md](./TESTING.md), which is honest about what is proven and what is not.
 
 ## Requirements
 
