@@ -14,7 +14,8 @@
     "test": "node --test --import tsx test/*.test.ts",
     "accept:sessions": "node acceptance/sessions.mjs",
     "accept:orphans": "node acceptance/orphans.mjs",
-    "accept:real": "node acceptance/real-agent.mjs"
+    "accept:real": "node acceptance/real-agent.mjs",
+    "accept:tmux-spike": "node acceptance/tmux-spike.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

@@ -892,3 +892,15 @@ Planning pass: repository/docs reviewed; plan created only.
 without executing them, and researched source APIs/JobSpy; see JOB-SOURCES-RESEARCH.md.
 No implementation, live source scraping, external notifications or applications run.
 Approved to proceed; see implementation entries below.
+
+### 2026-09-16 — step 1a complete
+
+- Baseline/approval commit: `c24aa4c`. Installed tmux 3.2a on this Linux machine.
+- Added `accept:tmux-spike`: disposable independent systemd owner/attachment services,
+  node-pty frontend, real alternate-screen fixture, SIGTERM/SIGKILL restart, same PID
+  identity, input, Unicode, resize, literal argv/environment, retained exit 23 and
+  negative owner-stop check. Passed outside sandbox (user bus/PTY access required).
+- Baseline `npm test` passed; `npm run typecheck` passed using Node 22.23.2.
+- Architecture contract: LINUX-SESSIONS.md. Live daemon/config unchanged.
+- This proves feasibility, not production recovery. Next: backend seam/registry (1b).
+- Stage commit is the commit containing this entry; subsequent entries record its hash.

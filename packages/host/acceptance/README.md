@@ -58,3 +58,10 @@ contiguous run of bytes in the stream — and over a few KB of banner text almos
 lowercase string matches as a subsequence by chance. `real-agent.mjs` therefore feeds
 the stream to a headless xterm and asserts on the resulting screen, which is both
 honest and exactly what the browser will show.
+
+## Linux persistent-session feasibility
+
+`npm run accept:tmux-spike -w @switchboard/host` requires Linux, tmux 3.2a+,
+Node 22 and an accessible systemd user bus. It starts uniquely named temporary user
+services and a private tmux socket; it never restarts the production daemon. It checks
+real service restarts and removes its own services/resources on completion.
