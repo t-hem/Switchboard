@@ -6,6 +6,7 @@
   "engines": { "node": "22.23.x" },
   "os": ["linux"],
   "scripts": {
+    "pretest": "node scripts/check-runtime.cjs",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx test/*.test.ts",

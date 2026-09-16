@@ -7,6 +7,7 @@ import { configDir, loadHostConfig } from "./config.js";
 import { AgentRegistry } from "./registry.js";
 import { SessionLedger } from "./ledger.js";
 import { SessionManager } from "./sessions.js";
+import { LinuxTmuxBackend } from "./platform/linux-tmux.js";
 
 async function main(): Promise<void> {
   if (process.platform !== "linux") throw new Error("Persistent session recovery is Linux-only");
@@ -29,7 +30,10 @@ async function main(): Promise<void> {
     throw new Error("Usage: node dist/recovery-cli.js list | attach <id> | terminate <id> (stop HTTP daemon for attach/terminate)");
   }
   // Exclusive registry ownership refuses control while another daemon is active.
-  const sessions = new SessionManager(config, AgentRegistry.load(config), SessionLedger.loadAndReconcile());
+  // Attach needs no live loop. Terminate reconciles only its target to confirm
+  // exit, without creating any daemon-owned terminal clients.
+  const sessions = new SessionManager(config, AgentRegistry.load(config), SessionLedger.loadAndReconcile(),
+    new LinuxTmuxBackend(config, configDir(), {reconcile:operation === "terminate", attach:false, sessionId:id}));
   try {
     const session = sessions.get(id);
     if (!session) throw new Error("Unknown session ID; list first");

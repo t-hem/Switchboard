@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api/client.ts";
 import type { AgentsConfigResponse, HostEntry, HostState } from "../types.ts";
@@ -34,7 +34,7 @@ export function useAgentConfigs(states: HostState[]): {
   const [configs, setConfigs] = useState<AgentConfigState>(new Map());
   const [loading, setLoading] = useState(false);
 
-  const reachable = states.filter((s) => s.status === "ok").map((s) => s.entry);
+  const reachable = useMemo(() => states.filter((s) => s.status === "ok").map((s) => s.entry), [states]);
   const key = reachable.map((e) => e.id).join(",");
 
   const fetchAll = useCallback(async (entries: HostEntry[]): Promise<void> => {
@@ -53,7 +53,7 @@ export function useAgentConfigs(states: HostState[]): {
     setLoading(false);
   }, []);
 
-  const refresh = useCallback(() => void fetchAll(reachable), [fetchAll, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refresh = useCallback(() => void fetchAll(reachable), [fetchAll, reachable]);
 
   useEffect(() => {
     void fetchAll(reachable);

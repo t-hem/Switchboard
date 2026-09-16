@@ -16,6 +16,8 @@
     "build": "npm run build -w @switchboard/host && npm run build -w @switchboard/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w @switchboard/host",
+    "test:all": "npm run jobs:check-runtime && npm test && npm run jobs:test",
+    "jobs:check-runtime": "node packages/jobs/scripts/check-runtime.cjs",
     "jobs:setup": "npm --prefix packages/jobs ci",
     "jobs:build": "npm --prefix packages/jobs run build && npm --prefix packages/jobs-ui run build",
     "jobs:test": "npm --prefix packages/jobs test",

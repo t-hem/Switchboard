@@ -72,6 +72,7 @@ export const api = {
 
   createSession: (
     entry: HostEntry,
+    // The daemon also accepts label/extraArgs for programmatic callers (spec §9).
     body: { agent: string; cwd: string; cols?: number; rows?: number },
   ): Promise<Session> => request(entry, "/sessions", { method: "POST", body: JSON.stringify(body) }),
 

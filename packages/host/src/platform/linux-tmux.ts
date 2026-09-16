@@ -31,10 +31,12 @@ export class LinuxTmuxBackend implements SessionBackend {
   readonly #config: NonNullable<HostConfig["tmux"]>;
   readonly #entries = new Map<string, RecoveryEntry>();
   readonly #handles = new Map<string, TmuxHandle>();
-  readonly #timer: NodeJS.Timeout;
+  readonly #timer: NodeJS.Timeout | undefined;
   readonly #gateDir: string;
 
-  constructor(config: HostConfig, dir: string) {
+  constructor(config: HostConfig, dir: string, private readonly options: {
+    reconcile?: boolean; attach?: boolean; sessionId?: string;
+  } = {}) {
     if (!config.tmux) throw new Error("Missing tmux configuration");
     const version = command("/usr/bin/tmux", ["-V"]);
     const match = /^tmux (\d+)\.(\d+)/.exec(version);
@@ -46,8 +48,10 @@ export class LinuxTmuxBackend implements SessionBackend {
     fs.mkdirSync(this.#gateDir, {recursive:true, mode:0o700});
     this.#registry = new RecoveryRegistry(dir, posixOps);
     for (const entry of this.#registry.list()) this.#entries.set(entry.session.id, entry);
-    this.#timer = setInterval(() => this.#poll(), 1000);
-    this.#timer.unref();
+    if (options.reconcile !== false) {
+      this.#timer = setInterval(() => this.#poll(), 1000);
+      this.#timer.unref();
+    }
   }
 
   #tmux(...args: string[]): string { return command("/usr/bin/tmux", ["-S", this.#config.socketPath, "-N", ...args]); }
@@ -214,6 +218,7 @@ export class LinuxTmuxBackend implements SessionBackend {
       return;
     }
     for (const entry of this.#entries.values()) {
+      if (this.options.sessionId && entry.session.id !== this.options.sessionId) continue;
       try {
         if (entry.ownerId !== this.#config.ownerId) throw new Error("Configured owner differs from recorded owner");
         const pane = panes.find(p => p.target === entry.target);
@@ -263,12 +268,12 @@ export class LinuxTmuxBackend implements SessionBackend {
           if (!settled?.dead) throw new Error("Pane changed while reconciling exit");
           entry.phase = "exited";
           delete entry.session.recovery;
-          handle.connect(); // retain final screen for exited sessions too
+          if (this.options.attach !== false) handle.connect(); // retain final screen for exited sessions too
           handle.exited(settled.exitCode);
         } else {
           if (pane.dead) throw new Error("Main process exited; descendants remain in the workload scope");
           delete entry.session.recovery;
-          handle.connect();
+          if (this.options.attach !== false) handle.connect();
         }
       } catch (err) {
         entry.session.recovery = errorText(err);

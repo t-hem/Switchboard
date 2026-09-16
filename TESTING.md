@@ -1,5 +1,11 @@
 # What still needs testing
 
+Use `nvm use` (or `nvm install` first) to select the pinned Node 22.23.2.
+`npm test` runs the cross-platform host suite. On Linux, run `npm run jobs:setup`
+once, then `npm run test:all` to cover both host and jobs. `npm run jobs:test`
+runs jobs alone. Both jobs entry points check the runtime before loading SQLite,
+so an unsupported Node version produces an actionable error.
+
 The automated suites drive real daemons, real PTYs and a real browser, and they run
 on Linux. Beyond them, as of 2026-09-15: the Linux daemon runs under systemd and
 serves the fleet, the phone and desktop clients have both been used by hand and the

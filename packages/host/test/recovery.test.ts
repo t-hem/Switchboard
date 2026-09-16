@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { RecoveryRegistry, type RecoveryEntry } from "../src/backends/registry.ts";
 import { posixOps } from "../src/platform/posix.ts";
+import { LinuxTmuxBackend } from "../src/platform/linux-tmux.ts";
+import type { HostConfig } from "../src/types.ts";
 
 const entry: RecoveryEntry = {
   backend: "tmux", ownerId: "owner", target: "sw-owner-example", scope: "sw-owner-example.scope",
@@ -16,6 +18,21 @@ function temporary(run: (dir: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sw-registry-test-"));
   try { run(dir); } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 }
+
+test("offline recovery disables the reconciliation timer", {skip:process.platform !== "linux" || !fs.existsSync("/usr/bin/tmux")}, t => temporary(dir => {
+  const registry=new RecoveryRegistry(dir,posixOps);
+  registry.put(entry);registry.close();
+  t.mock.timers.enable({apis:["setInterval"]});
+  const config={tmux:{socketPath:path.join(dir,"missing.sock"),ownerId:"owner"}} as HostConfig;
+  for (const reconcile of [false,true]) {
+    const backend=new LinuxTmuxBackend(config,dir,{reconcile,attach:false});
+    try {
+      const session=backend.recover()[0]!.session;
+      t.mock.timers.tick(2000);
+      assert.equal(Boolean(session.recovery),reconcile);
+    } finally {backend.close();}
+  }
+}));
 
 test("spawn intent survives reload; writes are isolated from caller mutation", {skip: process.platform !== "linux"}, () => temporary(dir => {
   const registry = new RecoveryRegistry(dir, posixOps);
