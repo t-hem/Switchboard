@@ -88,7 +88,10 @@ export function TerminalScrollbar({ viewport }: { viewport: HTMLElement | null }
       // `top-1` matches the p-1 the terminal sits in, and the track is exactly as
       // tall as the viewport — so thumb position is a straight proportion of
       // scrollTop, with no offset to correct for.
-      className="touch-only absolute right-0 top-1 w-4"
+      // Not touch-only. A desktop with a dead scroll wheel has no other way back
+      // through the buffer, and ↓ Latest never appears because nothing can scroll
+      // away from the bottom in the first place.
+      className="absolute right-0 top-1 w-4"
       style={{ height: clientHeight }}
       aria-hidden
     >

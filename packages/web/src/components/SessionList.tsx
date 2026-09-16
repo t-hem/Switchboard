@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { api } from "../api/client.ts";
 import type { HostState, SessionRef } from "../types.ts";
 import { StatusDot, activityOf, relativeTime } from "./StatusDot.tsx";
@@ -19,6 +21,12 @@ export function SessionList({
   onNewSession: (hostId: string) => void;
   onChanged: () => void;
 }) {
+  // Two-step confirm, matching Settings' host removal: the first click arms, the
+  // second acts. Both destinations here are irreversible enough to deserve it —
+  // killing a live agent throws away however long it has been working, and once a
+  // session is removed from the map nothing in the daemon remembers it.
+  const [arming, setArming] = useState<string | null>(null);
+
   return (
     <div className="flex flex-col">
       {states.map((state) => {
@@ -49,28 +57,55 @@ export function SessionList({
                       : session.status === "exited"
                         ? `exited${session.exitCode !== null ? ` (${session.exitCode})` : ""}`
                         : relativeTime(session.lastOutputAt, now)}
-                    {" · pid "}
-                    {session.pid}
+                    {/* An exited session has no pid worth reporting — the process is
+                        already gone. The space it occupied is the natural home for
+                        the control that clears the row. */}
+                    {reachable && session.status === "exited" ? null : (
+                      <>
+                        {" · pid "}
+                        {session.pid}
+                      </>
+                    )}
                   </span>
                 </span>
                 {reachable && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  title="Kill session"
-                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-neutral-600 hover:bg-neutral-800 hover:text-red-400"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void api.killSession(state.entry, session.id).finally(onChanged);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" && e.key !== " ") return;
-                    e.stopPropagation();
-                    void api.killSession(state.entry, session.id).finally(onChanged);
-                  }}
-                >
-                  ✕
-                </span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title={session.status === "exited" ? "Remove from the list" : "Kill this session"}
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+                      arming === session.id
+                        ? "bg-red-900/60 text-red-200 hover:bg-red-900"
+                        : "text-neutral-600 hover:bg-neutral-800 hover:text-red-400"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (arming !== session.id) {
+                        setArming(session.id);
+                        return;
+                      }
+                      setArming(null);
+                      void api.killSession(state.entry, session.id).finally(onChanged);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.stopPropagation();
+                      if (arming !== session.id) {
+                        setArming(session.id);
+                        return;
+                      }
+                      setArming(null);
+                      void api.killSession(state.entry, session.id).finally(onChanged);
+                    }}
+                  >
+                    {arming === session.id
+                      ? session.status === "exited"
+                        ? "Really delete?"
+                        : "Really kill?"
+                      : session.status === "exited"
+                        ? "Delete"
+                        : "✕"}
+                  </span>
                 )}
               </button>
             ))}

@@ -128,7 +128,15 @@ ok("session row shows an activity state", dotTitle.length > 0, JSON.stringify(do
 
 console.log("\n=== killing the session from the list ===");
 const sessionsBefore = (await (await fetch(`${HOST_URL}/sessions`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()).length;
+// Two-step, like host removal: the first click only arms it. A single click used
+// to kill outright, which cost a real six-hour session to one misclick.
 await clickText('[role="button"]', "✕");
+await sleep(300);
+ok("first click arms rather than kills", has(await text(), "Really kill"), (await text()).slice(0, 200));
+const stillThere = (await (await fetch(`${HOST_URL}/sessions`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()).length;
+ok("nothing killed while merely armed", stillThere === sessionsBefore, `${sessionsBefore} -> ${stillThere}`);
+
+await clickText('[role="button"]', "Really kill");
 await sleep(6000);
 const sessionsAfter = (await (await fetch(`${HOST_URL}/sessions`, { headers: { Authorization: `Bearer ${TOKEN}` } })).json()).length;
 ok("session removed on the daemon", sessionsAfter === sessionsBefore - 1, `${sessionsBefore} -> ${sessionsAfter}`);
