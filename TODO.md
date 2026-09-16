@@ -1,9 +1,15 @@
 # TODO
 
 Implementation status (2026-09-16): Linux recovery steps 1a–1d are implemented,
-verified and deployed, including a real coding-agent self-restart. Step 2 (isolated jobs scaffold) is complete; step 3 persistence is next.
-See JOB-APPLICATION-PLAN.md for the staged log. Jobs scaffold is implemented and verified; review-loop implementation has not started.
+verified and deployed, including a real coding-agent self-restart. Jobs steps 2–4
+(isolated scaffold, persistence, and the dashboard/review UI) are complete and
+verified on Linux; step 5 (import/capture job postings) is next. See
+JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md and packages/jobs/DATABASE.md for current code/schema details.
+
+Work on step 5 happens on the `step4-jobs-dashboard` branch (created when a second
+agent joined; master previously held all commits directly). Merge/push master only when
+the stage is reviewable.
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 
@@ -81,14 +87,23 @@ Later, reusing the identical mechanism: `pr-reviewer`, `fix-worker`.
 
 ## 2. Scrape the current model from scrollback (display)
 
-What the UI shows. Survives switching models inside the CLI, which spawn-time tracking
-does not. Independent of #1 and #3 — those are launch-side, this is display-side.
+**This is the actual feature.** The requirement was a model label on the tab so you can
+tell a pi/deepseek session from a pi/local-qwen one without tabbing in. The scrape
+delivers that with nothing to maintain, and stays correct when the model is switched
+mid-session — which launch-time tracking never is. #3 exists for programmatic spawning,
+not for this.
 
 - Take the last ~8 KB of the session's ring buffer, strip ANSI escapes.
 - Run a list of regexes against it, first match wins.
-- Cache per session, re-scrape at most once a minute. Manual refresh button optional.
+- Re-scrape at most once a minute. Manual refresh button optional.
 - Expose as `Session.detected: { model?: string; summary?: string } | null`.
 - Render next to the agent name in the session list row; show nothing if no match.
+
+**Cache stickily.** Most CLIs print the model once at startup, so an 8 KB tail loses it
+as soon as the session scrolls. Keep the last known value when a later pass finds no
+match, rather than clearing it. A mid-session switch still updates the label when it is
+announced, and a long scrollback does not blank it. Without this the feature silently
+stops working on exactly the long-running sessions it is most useful for.
 
 Regexes live in `agents.json` per agent, so a new harness is a config line:
 
@@ -110,14 +125,20 @@ Notes:
 
 ## 3. `model` on POST /sessions (launch)
 
-Spawn-time selection. Normally supplied by the persona (#1); this is the plumbing
-underneath it plus a manual override in the modal.
+Deliberately minimal. This exists so a persona can declare `model: deepseek-v3` and an
+add-on can spawn with it programmatically — it is NOT how the UI label works (#2 is).
 
-- `AgentDef` gains `modelArgs?: string[]` as a template, e.g. `["--model","{model}"]`,
-  and `models?: string[]` as a suggestion list for the dropdown.
+- `AgentDef` gains `modelArgs?: string[]` as a template, e.g. `["--model","{model}"]`.
 - `POST /sessions` accepts `model?: string`; substitute into `modelArgs`, append to
   base args.
-- Modal gets a model input backed by a `datalist` from `models`, free text allowed.
+- Modal: free-text field or nothing at all. No dropdown.
+
+**Explicitly rejected: a `models?: string[]` suggestion list.** It buys a saved
+keystroke and costs a hand-maintained list that goes stale every time a provider ships
+a model — `agy models` alone changed substantially in a week. For the two or three
+models actually used interactively, extra `agents.json` entries sharing one binary
+(`antigravity-opus`, `antigravity-flash`) are less machinery than a dropdown and give
+distinguishable session rows for free.
 
 ## 4. Modal gaps (small)
 
@@ -140,6 +161,20 @@ Destination is not configured yet; changing transports must leave workflow code 
 - Mandatory priority: crash either/both services, reconnect surviving children, record
   deaths and safely retry preparation with linked history. Submission ambiguity never
   triggers a blind retry. Repeat this at final acceptance.
+
+## 6. Low priority — hand-edited `agents.json` is not picked up
+
+`loadAgentsConfig()` runs once when the registry is constructed at startup; the only
+reload is inside the `PUT /config/agents` handler. Nothing watches the file, so editing
+it by hand does nothing visible until a daemon restart or a save through Settings.
+
+- Workaround today: restart the daemon, or bump `updatedAt` and save via Settings.
+- Fix: watch the file (debounced), validate with `parseAgentsPayload`, reload in place
+  on success, log and keep the previous map on failure. A bad hand-edit must never take
+  the daemon's agent list down.
+- Related hazard worth a note in the README either way: a hand-edit that does not bump
+  `updatedAt` looks *older* than other hosts' copies, so the next client sync can push
+  another machine's version over it. Drift detection compares only that timestamp.
 
 Details and current operator decisions: [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md).
 Source research: [JOB-SOURCES-RESEARCH.md](./JOB-SOURCES-RESEARCH.md).

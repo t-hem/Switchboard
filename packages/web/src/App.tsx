@@ -18,6 +18,7 @@ import {
 import { useAgentConfigs } from "./state/useAgentConfigs.ts";
 import { useClaim } from "./state/useClaim.ts";
 import { useFleet } from "./state/useFleet.ts";
+import { useJobsConnection } from "./state/useJobsConnection.ts";
 import type { HostEntry } from "./types.ts";
 
 /** Relative timestamps and the idle indicator need to re-render on their own. */
@@ -31,6 +32,7 @@ function useNow(intervalMs = 1000): number {
 }
 
 export function App() {
+  const jobs = useJobsConnection();
   const [hosts, setHosts] = useState<HostEntry[]>(() => loadHosts());
   const clientId = useMemo(() => loadClientId(), []);
   const [clientLabel, setClientLabelState] = useState(() => loadClientLabel());
@@ -200,6 +202,11 @@ export function App() {
               ☰
             </button>
           </header>
+          {jobs.url && <div className="px-4 pb-2 text-xs">
+            {jobs.status === "online"
+              ? <a href={jobs.url} target="_blank" rel="noopener noreferrer" className="text-blue-300">Jobs ↗</a>
+              : <button onClick={()=>setSettingsOpen(true)} className="text-neutral-400">Jobs {jobs.status} · connection settings</button>}
+          </div>}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <SessionList
               states={orderedStates}
@@ -259,6 +266,7 @@ export function App() {
 
       {settingsOpen && (
         <Settings
+          jobs={jobs}
           states={orderedStates}
           now={now}
           configs={configs}

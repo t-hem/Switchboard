@@ -6,11 +6,29 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { buildServer } from "../src/server.js";
 import { SettingsStore } from "../src/store.js";
+import { ArtifactStore } from "../src/artifacts.js";
 import { assertRuntime } from "../src/config.js";
 import { createSpawner, SwitchboardSpawner, type AgentSpawner } from "../src/adapters/spawner.js";
 
 const token="test-jobs-token-never-for-host";
 const headers={authorization:`Bearer ${token}`};
+test("diagnostics reuse a timestamped snapshot until its TTL expires",async(t)=>{
+ let now=1_800_000_000_000;
+ t.mock.method(Date,"now",()=>now);
+ const inspect=t.mock.method(ArtifactStore.prototype,"inspect",()=>({sqlite:["ok"],foreignKeys:[],artifactErrors:[],unreferencedFiles:[],stagingFiles:[]}));
+ await fixture(async(app)=>{
+  assert.equal((await app.inject({url:"/api/diagnostics"})).statusCode,401);
+  assert.equal(inspect.mock.callCount(),0);
+  const first=(await app.inject({url:"/api/diagnostics",headers})).json();
+  now+=59_999;
+  assert.deepEqual((await app.inject({url:"/api/diagnostics",headers})).json(),first);
+  assert.equal(inspect.mock.callCount(),1);
+  now++;
+  const next=(await app.inject({url:"/api/diagnostics",headers})).json();
+  assert.notEqual(next.checkedAt,first.checkedAt);
+  assert.equal(inspect.mock.callCount(),2);
+ });
+});
 async function fixture(run:(app:ReturnType<typeof buildServer>,dir:string)=>Promise<void>){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"jobs-scaffold-"));
  const app=buildServer({port:7780,token,allowedOrigins:["https://jobs.example.test"]},new SettingsStore(path.join(dir,"jobs.sqlite")),dir);

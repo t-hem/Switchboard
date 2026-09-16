@@ -422,7 +422,9 @@ The default/direct backend and Windows still terminate sessions during shutdown.
 ## Optional jobs application
 
 The Linux-only jobs app is a separate package and service, disabled by default.
-It currently provides versioned settings and a standalone editor; search, agent work
-and applications are not implemented yet. Root/core installation remains independent.
+It provides versioned settings, a dashboard, durable review decisions and evidence
+downloads; search, agent work and applications are not implemented yet. Configure its
+origin in Switchboard Settings for an optional Jobs link. Enter the separate jobs token
+in the Jobs app itself. Root/core installation remains independent.
 See [packages/jobs/README.md](packages/jobs/README.md) for opt-in setup and
 [packages/jobs/DATABASE.md](packages/jobs/DATABASE.md) for the actual schema.

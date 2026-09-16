@@ -5,8 +5,10 @@ import type { AgentsConfigResponse, HostEntry, HostState } from "../types.ts";
 import { AgentsEditor } from "./AgentsEditor.tsx";
 import { HostSetup } from "./HostSetup.tsx";
 import { relativeTime } from "./StatusDot.tsx";
+import { JobsConnection } from "./JobsConnection.tsx";
 
 export function Settings({
+  jobs,
   states,
   now,
   configs,
@@ -18,6 +20,7 @@ export function Settings({
   onClientLabelChange,
   onClose,
 }: {
+  jobs: {url:string; status:string; save:(value:string)=>void};
   states: HostState[];
   now: number;
   configs: Map<string, AgentsConfigResponse>;
@@ -166,6 +169,7 @@ export function Settings({
               />
             </label>
           </section>
+          <JobsConnection url={jobs.url} status={jobs.status} onSave={jobs.save} />
         </div>
       </div>
     </div>

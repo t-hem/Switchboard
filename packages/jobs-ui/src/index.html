@@ -1,6 +1,19 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job applications</title><link rel="stylesheet" href="/style.css"></head><body>
 <main><h1>Job applications</h1><p>Local settings and records. This early build does not search, start agents, or submit applications.</p>
 <form id="connect"><label>Jobs service token <input id="token" type="password" autocomplete="off" required></label><button>Connect</button><button id="disconnect" type="button">Forget token</button></form>
-<p id="message" role="status"></p><section id="settings" hidden><h2>Settings</h2><p id="state"></p><p>All current settings are editable below. Every review gate starts on. Enabling jobs records your preference; workers remain unavailable in this build.</p>
+<p id="message" role="status"></p>
+<section id="dashboard" hidden><h2>Overview</h2><p id="workflow-state"></p>
+<div class="actions"><button id="refresh-dashboard">Refresh dashboard</button><button disabled>Search unavailable</button><button disabled>Start agent unavailable</button><button disabled>Submit unavailable</button></div>
+<p id="counts"></p><p>Lists show up to 100 records. Reviews record decisions against saved inputs; they do not start work in this build.</p>
+<h2>Needs your attention</h2><div id="attention"></div>
+<h2>Child agents</h2><div id="agents"></div><h2>Tasks</h2><div id="tasks"></div>
+<h2>Jobs</h2><div id="jobs"></div><h2>Applications</h2><div id="applications"></div>
+<h2>Recent decisions</h2><div id="decisions"></div>
+<section id="record" hidden tabindex="-1"><h2 id="record-title"></h2><div id="record-links" class="actions"></div><pre id="record-data"></pre>
+<form id="decision" hidden><label>Reason or requested changes<textarea id="reason" rows="3" maxlength="10000"></textarea></label>
+<div class="actions"><button name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button><button name="decision" value="request_changes">Request changes</button></div></form></section>
+<details><summary>Data diagnostics</summary><p>Integrity results are cached for 60 seconds. Loading an expired snapshot scans the local store.</p><button id="diagnostics">Load diagnostics</button><pre id="diagnostics-data"></pre></details>
+</section>
+<section id="settings" hidden><h2>Settings</h2><p id="state"></p><p>All current settings are editable below. Every review gate starts on. Enabling jobs records your preference; workers remain unavailable in this build.</p>
 <label for="editor">Settings JSON</label><textarea id="editor" spellcheck="false" rows="24"></textarea><div class="actions"><button id="save">Save settings</button><button id="reload">Reload saved settings</button><button id="export">Export settings</button><label>Import JSON <input id="import" type="file" accept="application/json"></label></div>
 <p id="revision"></p><h2>Service details</h2><pre id="details"></pre><p>Port, allowed origins, and the service token are machine bootstrap settings in the private service.json file; changing them requires a service restart. Database location cannot be changed online.</p></section></main><script src="/app.js" type="module"></script></body></html>

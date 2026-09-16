@@ -217,3 +217,18 @@ resume, applicant answers or other full records. The in-app inbox holds all mate
 The UI remains the source of truth; notification delivery is optional and non-blocking.
 Test through a local receiver. A service cannot notify after it has crashed; independent
 monitoring can be added later and is separate from the mandatory child-recovery tests.
+
+## Job sites/boards (some mentioned earlier)
+Sourcing
+
+Skip the aggregators as your primary layer. The clean path is hitting ATS JSON endpoints directly, per company. They're public, unauthenticated, stable, and nobody's blocking you:
+
+Greenhouse: boards-api.greenhouse.io/v1/boards/{co}/jobs?content=true
+Lever: api.lever.co/v0/postings/{co}?mode=json
+Ashby: api.ashbyhq.com/posting-api/job-board/{co}
+Workable: apply.workable.com/api/v3/accounts/{co}/jobs
+SmartRecruiters: api.smartrecruiters.com/v1/companies/{co}/postings
+
+You maintain a company list (a few hundred slugs), poll every few hours, diff against what you've seen. This is the highest-signal, lowest-fragility layer and it's maybe 200 lines.
+
+For breadth on top of that: Adzuna and USAJOBS have free real APIs, HN "Who's Hiring" via the Algolia API, RemoteOK/Arbeitnow for remote. For the consumer boards, JobSpy pulls LinkedIn, Indeed, Glassdoor, Google, and ZipRecruiter into one normalized DataFrame, but it works until it gets blocked and you'll need proxies for LinkedIn. Treat it as a bonus source, not a dependency.

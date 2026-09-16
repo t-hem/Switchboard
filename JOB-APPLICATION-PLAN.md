@@ -1030,3 +1030,45 @@ Approved to proceed; see implementation entries below.
   unresolved child/retry guards and backup round-trip/corruption refusal. Standalone HTTP
   and Chromium mobile-viewport/revision-conflict acceptance passed again on schema 2.
   No host code changed and no external work was dispatched.
+
+### 2026-09-16 — step 4 complete
+
+- Step 3 committed/pushed as `857c103`. Earlier uncommitted step-4 starting point:
+  schema-3 `attention_items` migration, `reviews.ts`, `dashboard.ts`, server
+  registration and the storage version assertion.
+- Core integration is deliberately narrow: an optional machine-local
+  `switchboard.jobsUrl` origin stored in browser localStorage, an unauthenticated
+  `/health` identity probe (timeout, 15s interval), and a sidebar link when online or
+  a connection-settings entry when offline. No host/daemon or jobs token crosses the
+  boundary; the jobs bearer token is entered only in the standalone jobs client.
+- Jobs client (`packages/jobs-ui`) gained bounded dashboard lists (100 rows: jobs,
+  applications, tasks, child agents, attention, recent decisions), saved
+  task/agent/job/application details, authenticated artifact downloads forced inert
+  (`application/octet-stream` + `Content-Disposition: attachment`), review decisions
+  with version and settings-revision conflict checks, and 60s-cached data diagnostics.
+  Search/start-agent/submit controls render disabled and stay unavailable.
+- Review storage ties a decision to exact saved inputs: `attention_items` is immutable
+  in its subject/version/context/task/run/artifact/settings columns, supersedes older
+  open items for the same subject, and refuses decisions when settings or
+  waiting-review task state changed. Approving records a decision only; a generic
+  approval never dispatches work.
+- Diagnostics cache is a repeated-request mitigation (60s, `checkedAt`/`cacheTtlMs`);
+  cache misses still scan synchronously, and offline `data-cli inspect` remains uncached
+  for repair/backup verification.
+- Migration `schema 2 → 3` is transactional; a shipped schema-2 database retains its
+  settings, tasks and artifacts, and future versions still fail unchanged.
+- Verification (Node 22.23.2, Linux): `npm run jobs:build`, `npm run jobs:typecheck`
+  and `npm run jobs:test` (24 tests, including the diagnostics-cache regression and
+  four review-guard tests) passed; `npm run typecheck` and `npm test` (74 host tests)
+  passed. `node packages/jobs/acceptance/scaffold.mjs` passed (independent lifecycle,
+  auth, disabled dispatch, validation, stale-tab conflict, settings across restart,
+  zero calls to the network trap). With an isolated core build,
+  `WEB_DIST=… JOBS_BROWSER_EXECUTABLE=… node packages/jobs/acceptance/dashboard.mjs`
+  reported ALL PASS: desktop+mobile durable reviews, stale-decision conflict, verified
+  inert artifact download, cross-tab disable gate, online/offline core navigation, and
+  the existing `ui`, `claim` and `agent-sync` core suites. `document-schema.mjs`
+  regenerated DATABASE.md identically (docs current).
+- The machine's web rebuild timer was stopped during client editing and restored after
+  this verification; production core bundle then rebuilt from the committed source.
+- No live jobs service, source crawl, child agent, notification or application was
+  enabled or dispatched. No host/runtime behavior changed beyond optional navigation.

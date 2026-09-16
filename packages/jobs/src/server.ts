@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { dashboardRoutes } from "./dashboard.js";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
@@ -19,7 +20,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
       const sameOrigin = origin===`http://${req.headers.host}`;
       if (!sameOrigin && !config.allowedOrigins.includes(origin)) throw new AppError("origin_denied","UI origin is not allowed",403);
       reply.header("Access-Control-Allow-Origin",origin).header("Vary","Origin");
-      reply.header("Access-Control-Allow-Headers","Authorization, Content-Type").header("Access-Control-Allow-Methods","GET, PUT, OPTIONS");
+      reply.header("Access-Control-Allow-Headers","Authorization, Content-Type").header("Access-Control-Allow-Methods","GET, PUT, POST, OPTIONS");
     }
     if(req.method==="OPTIONS")return reply.code(204).send();
     if (!req.url.startsWith("/api/")) return;
@@ -41,6 +42,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     if (url.username || url.password || url.search || url.hash) throw new AppError("invalid_settings","Use a base URL without credentials/query/fragment",400,[{path:"/spawner/baseUrl",message:"Credentials and query parameters are not allowed"}]);
     return store.update(req.body.expectedRevision,req.body.value);
   });
+  dashboardRoutes(app,store,dir);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{
       const file=new URL(name,uiDir);

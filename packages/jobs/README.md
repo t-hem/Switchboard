@@ -1,8 +1,8 @@
 # Jobs service
 
 Linux-only, optional, and independent of Switchboard. No discovery, agents, browser
-work or application submission runs in the scaffold, even if enabled. The standalone
-settings editor reports that limitation. Initial settings are disabled/paused with
+work or application submission runs yet, even if enabled. The standalone dashboard
+reports that limitation. Initial settings are disabled/paused with
 all review gates enabled. SQLite stores each settings revision; stale saves return 409.
 
 ## Install and run
@@ -40,18 +40,24 @@ installation, builds and tests; jobs-ui is separately buildable. Root `jobs:*` s
 are conveniences only. `npm ci`, `npm run build` and `npm test` remain core-only.
 There are no imports from host/web source into jobs, or from jobs into host/web.
 
-The initial client is a small static structured-settings editor. Step 4 expands it
-into the planned separate dashboard and optional Switchboard navigation integration.
-All current workflow settings can be edited/imported/exported now. Future controls
-are not presented as functioning features. Machine bootstrap is currently edited
-locally; the richer connections UI is part of step 4.
+The standalone client has dashboard lists, a durable review inbox, saved task/agent/
+job/application details, decision history, authenticated artifact downloads and data
+diagnostics. All current workflow settings can be edited/imported/exported in the
+structured JSON editor. Worker/search/submission controls are visibly unavailable.
+Machine bootstrap secrets remain private local files, not round-tripped through UI.
+
+In Switchboard Settings, optionally save the Jobs service origin. The core client
+stores only that origin and checks `/health`; add the Switchboard UI origin to Jobs'
+`allowedOrigins` for cross-origin checks. An online service gets a Jobs link; an offline
+one keeps a connection-settings entry without blocking sessions. The Jobs token is
+entered in the standalone app, never placed in a link or copied from host settings.
 
 ## Dependency decisions
 
 - Storage: built-in `node:sqlite`, verified on Node 22.23.2 / SQLite 3.51.3. This Node
   release labels it experimental; the jobs runtime is constrained to the tested minor
   line rather than assuming all Node 22 releases expose the same API. SQL uses prepared
-  statements, transactions, foreign keys and a busy timeout. Schema 2 stores versioned settings, workflow evidence and task leases. The storage
+  statements, transactions, foreign keys and a busy timeout. Schema 3 stores versioned settings, workflow evidence, task leases and durable attention items. The storage
   APIs are implemented; workflow execution remains disabled until its later stages.
 - HTTP: Fastify **5.12.4**. Browser/PDF engine: `puppeteer-core` **25.11.0**, chosen for
   both page evidence and HTML-template PDF rendering. It does not install or start a
@@ -73,11 +79,26 @@ or dropping unknown fields. Errors use `{error:{code,message,fields}}`. No crede
 are returned in settings. `GET /api/status` reports actual capabilities and dispatch
 state. Settings/source/integration exports never include secrets.
 
+`GET /api/dashboard` returns up to 100 rows per list. Detail reads are
+`/api/tasks/:id`, `/api/agents/:id`, `/api/jobs/:id`, `/api/applications/:id`, and
+`/api/reviews/:id`. `POST /api/reviews/:id/decision` accepts `expectedVersion`,
+`expectedSettingsRevision`, `decision` (`approve`, `deny`, `request_changes`) and
+`reason`. Decisions require an open item, unchanged settings and a task still waiting
+for review. Workflow code alone creates review items; recording approval does not
+dispatch work. Saved decisions and reviewed inputs survive restart.
+
+`GET /api/artifacts/:hash` verifies the stored bytes and forces an inert download.
+`GET /api/diagnostics` caches full integrity inspection for 60 seconds and returns
+`checkedAt` (UTC ISO) and `cacheTtlMs`. Cache misses still scan synchronously; this is
+a repeated-request mitigation, not a background scanner for large stores.
+
 ```sh
 npm run jobs:typecheck
 node packages/jobs/acceptance/scaffold.mjs
 # Optional real browser checks, using an already-installed matching browser:
 JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/scaffold.mjs
+# After building core web into a temporary directory:
+WEB_DIST=/absolute/temporary/web-build JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/dashboard.mjs
 ```
 
 Acceptance uses disposable data/port 17900 and checks auth, independent start/stop,
@@ -86,7 +107,7 @@ mobile viewport, save/reload, invalid input and competing-tab revision conflicts
 Unknown database versions are refused without mutation. Physical phone/Windows tests
 are separate; this service intentionally does not support Windows.
 
-## Local data operations (schema 2)
+## Local data operations (schema 3)
 
 Use the same Node 22 runtime and `JOBS_DIR` as the service:
 
@@ -99,7 +120,7 @@ node packages/jobs/scripts/document-schema.mjs # regenerate column reference aft
 
 Inspection reports SQLite/FK errors, missing/corrupt artifacts, unfinished staging files
 and unreferenced published files; errors return a nonzero exit status. It never cleans
-up evidence automatically. Inspection/backup require an existing schema-2 database and
+up evidence automatically. Inspection/backup require an existing current-schema database and
 do not generate credentials or migrate old data. Normal service startup performs tested
 migrations. Backups can run while the service is open; do not copy a live SQLite file
 alone. Restore verifies hashes and starts disabled/paused with pending work blocked or

@@ -1,9 +1,34 @@
 # Implementation handoff
 
-Updated 2026-09-16. Continue the approved JOB-APPLICATION-PLAN.md stage by stage; verify,
-update docs, commit and push before the next stage. The user is away and authorized
-continued work. Current session permissions are unrestricted with approval policy never.
-Do not wait for routine decisions. Do not commit the user's reference ZIP archives.
+Updated 2026-09-16 (second agent session). Continue the approved
+[JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) stage by stage; verify, update
+docs, commit and push the branch before the next stage. The user is away and
+authorized continued work.
+
+## Branching — read this first
+
+A second agent joined on 2026-09-16. Until then everything was committed directly on
+`master`. From now on, stage work happens on a **branch** and `master` is not written
+to directly.
+
+- Branch for the jobs plan: **`step4-jobs-dashboard`** (created from `master` at
+  `3cc5add`, carrying the uncommitted step-4 work). Push it to `origin`.
+- `master` is at `3cc5add` and is intentionally behind this branch.
+- Merge to `master` once a stage is verified and reviewable. Do not force-push over
+  another agent's branch; create a new branch for unrelated work.
+
+## Environment
+
+- Node **22.23.2** is required (`.nvmrc`); the default shell Node is v20.20.2. Prefix
+  commands with `source ~/.nvm/nvm.sh && nvm use 22.23.2`. Jobs entry points refuse an
+  unsupported Node with an actionable message.
+- The user's two reference ZIP archives (`aisuite-main.zip`, `openworker-main.zip`) are
+  untracked and must **not** be committed.
+- Live services on this machine: `switchboard.service`, `switchboard-owner.service`
+  active; `switchboard-web.timer` normally active (it was paused while editing core
+  client navigation and has been restored).
+- Never restart the tmux owner during routine upgrades. Restarting only
+  `switchboard.service` is safe and retains persistent workloads.
 
 ## Completed and deployed
 
@@ -15,74 +40,105 @@ Linux persistent sessions, steps 1a–1d:
 - `6d38106`: actual Switchboard-created coding agent's README fix; it tested, committed,
   built and restarted the real daemon, then continued with the same agent PID/session ID.
 - `dc0a5af`: rollout recovery fixes, browser/offline/crash acceptance and documentation.
+- `3cc5add`: current host credentials in manual config refresh; offline attach has no
+  reconciliation timer; offline terminate reconciles only its target and never creates
+  hidden tmux clients; Node 22.23.2 pin, jobs runtime guard, `npm run test:all`.
 
-These commits are pushed. `switchboard.service`, `switchboard-owner.service` and
-`switchboard-web.timer` are active. Persistent backend is enabled in machine-local
-host.json. No live agent was interrupted during migration. The real self-upgrade test
-session was explicitly cleaned up. Never restart the tmux owner during routine upgrades.
-See LINUX-SESSIONS.md for exact recovery commands and display/ownership limitations.
+`switchboard.service`, `switchboard-owner.service` and `switchboard-web.timer` are
+active. Persistent backend is enabled in machine-local `host.json`. See
+[LINUX-SESSIONS.md](./LINUX-SESSIONS.md) for exact recovery commands and
+display/ownership limitations.
 
 `node packages/host/acceptance/restart.mjs --browser` passed all cases including crashes
 in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/resize and
-mobile viewport. Root typecheck and 69 host tests passed. Physical phone and real Windows
-hardware remain outstanding; Windows retains direct shutdown behavior.
+mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
+retains direct shutdown behavior.
 
-## Completed stage: 2, jobs scaffold
+## Jobs stages 2–4
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
-structured settings editor). They intentionally are not root npm workspaces: root npm
+dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
 installation must not pull optional jobs/browser/native dependencies onto Windows/core
 installs. Jobs has a separate package-lock; root `jobs:*` scripts are conveniences.
 
-Implemented: authenticated settings/status API; strict validation; SQLite immutable
-settings revisions with stale-write conflict checks; disabled scheduler shell with no
-background work; replaceable spawner observation contract/factory with Switchboard
-HTTP adapter and fake-alternative contract tests; initial client edits every current
-workflow setting. Port/token/allowed-origin bootstrap is still a private local file.
-No job search, applicant import, persona execution, agent work or submission is enabled.
+- **Step 2** (`6b00ea5`): authenticated settings/status API, strict validation, SQLite
+  settings revisions with stale-write conflicts, disabled scheduler shell, replaceable
+  spawner observation contract, initial client.
+- **Step 3** (`857c103`): schema 2 — workflow entities, immutable historical inputs,
+  foreign keys, dedup keys, audit events, task leases/generations/fences, full agent
+  context snapshot columns; content-addressed artifacts; queue fencing; online
+  backup/restore; data CLI. Schema docs are generated by
+  `packages/jobs/scripts/document-schema.mjs`.
+- **Step 4** (verified, on branch `step4-jobs-dashboard`): schema 3 `attention_items`
+  plus `reviews.ts`/`dashboard.ts`; optional core navigation
+  (`packages/web/src/state/useJobsConnection.ts`, `components/JobsConnection.tsx`);
+  standalone dashboard lists/details, review decisions, artifact downloads, cached
+  diagnostics. See the plan's "step 4 complete" log entry for the full verification.
 
-Database details, including every implemented column and settings JSON field:
-`packages/jobs/DATABASE.md`. Runtime/package/API details: `packages/jobs/README.md`.
-Node baseline 22.23.2 (accepts 22.23.x), built-in SQLite 3.51.3; Fastify 5.12.4;
-puppeteer-core 25.11.0 for future capture/PDF rendering, with no browser download/start
-at install. Jobs dependency installation has completed. Jobs build and seven scaffold
-unit tests passed. Browser/HTTP acceptance and a fresh core-only Linux install/build plus Windows
-dependency-resolution dry run all passed. The browser harness explicitly focuses
-tabs before clicking; an earlier background-tab click stalled and was corrected.
+Step 4 verification (Node 22.23.2, Linux): `npm run jobs:build`, `npm run jobs:typecheck`,
+`npm run jobs:test` (24 tests), `npm run typecheck`, `npm test` (74 host tests) all
+passed. `node packages/jobs/acceptance/scaffold.mjs` passed. With an isolated core
+build, `WEB_DIST=/tmp/switchboard-jobs-stage4-web JOBS_BROWSER_EXECUTABLE=<chrome>
+node packages/jobs/acceptance/dashboard.mjs` reported ALL PASS for dashboard, `ui`,
+`claim` and `agent-sync`. `DATABASE.md` regenerates identically.
 
 Commands (Node 22 on PATH):
 
 ```sh
 npm run jobs:build
-npm run jobs:test
 npm run jobs:typecheck
+npm run jobs:test
 node packages/jobs/acceptance/scaffold.mjs
-# For browser mode set JOBS_BROWSER_EXECUTABLE to the already-installed Chrome path.
+# Browser mode needs an already-installed Chrome plus an isolated core web build:
+#   WEB_DIST=/tmp/switchboard-jobs-stage4-web \
+#   JOBS_BROWSER_EXECUTABLE=/home/thomas/.cache/puppeteer/chrome/linux-153.0.8010.36/chrome-linux64/chrome \
+#   node packages/jobs/acceptance/dashboard.mjs
 npm run typecheck
 npm test
+npm run test:all   # host + jobs
 ```
 
-The installed Puppeteer 25 executablePath() is asynchronous. A prior browser harness
-attempt supplied the printed Promise instead of the path; fixed the invocation and
-reran. No product fault was found in that failed attempt.
+Installed Chrome used for acceptance:
+`/home/thomas/.cache/puppeteer/chrome/linux-153.0.8010.36/chrome-linux64/chrome`.
+The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harness
+attempt supplied the printed Promise instead of the path, which was fixed. The browser
+harness explicitly focuses tabs before clicking.
 
-Stage 2 is committed as `6b00ea5`. Stage 3 is verified and ready for its separate commit:
-schema 2, immutable artifacts, task/scheduler fencing, audit, data CLI and backup/restore.
-All 19 jobs tests and standalone HTTP/Chromium acceptance passed. Generated DATABASE.md
-lists every column/constraint/trigger and explains relationships/recovery/JSON boundaries.
-The schema documentation generator requires a fresh jobs build and Node 22, like jobs.
+## Next: step 5 — import and capture job postings with evidence
 
-Next is step 4: optional Switchboard navigation plus separate jobs dashboard/settings,
-read-only workflow lists/details/diagnostics and durable attention/review actions. Future
-execution controls must remain visibly unavailable until callers exist. The current
-queue is a library, not a running worker: step 7 must inventory children before recovery
-and dispatch, and step 10 must apply evidence/review/site policy before send intent.
-No jobs live service or external crawling/notifications/applications has been enabled.
+Read step 5 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) and
+[JOB-SOURCES-RESEARCH.md](./JOB-SOURCES-RESEARCH.md) before starting. Begin with
+explicit URL/manual-text import, a deterministic local fixture website, browser capture
+and normalized posting data, then one real source adapter (ATS JSON endpoints are the
+recommended first layer). Do not implement arbitrary-site automation first. Keep
+untrusted HTML inert in the dashboard, and never fetch local files/private endpoints
+unless explicitly permitted for the isolated dev fixture.
 
-Storage implementation: `database.ts` migrates version 0/1 to 2 transactionally;
-`schema.ts` owns SQL; `artifacts.ts` publishes/fsyncs before DB references;
-`queue.ts` uses owner/generation/fence and refuses unresolved-child retries;
-`backup.ts` uses SQLite online backup + hash manifest and disabled/paused restore;
-`data-cli.ts` provides inspect/backup/restore without bootstrapping an empty service.
-Tests in `test/storage.test.ts` include real killed subprocesses and competing processes.
-Keep this handoff and DATABASE.md current as each stage changes the implementation.
+Future execution controls must remain visibly unavailable until callers exist. The
+current queue is a library, not a running worker: step 7 must inventory children before
+recovery and dispatch, and step 10 must apply evidence/review/site policy before send
+intent. No jobs live service or external crawling/notifications/applications has been
+enabled.
+
+## Storage implementation pointers
+
+`database.ts` migrates version 0/1→2→3 transactionally; `schema.ts` owns SQL;
+`artifacts.ts` publishes/fsyncs before DB references; `queue.ts` uses
+owner/generation/fence and refuses unresolved-child retries; `backup.ts` uses SQLite
+online backup + hash manifest and disabled/paused restore; `data-cli.ts` provides
+inspect/backup/restore without bootstrapping an empty service; `reviews.ts` enforces
+immutable review inputs and version/settings conflict checks. Tests in
+`test/storage.test.ts` and `test/reviews.test.ts` include real killed subprocesses,
+competing processes and audit-rollback cases. Keep this handoff and DATABASE.md current
+as each stage changes the implementation.
+
+## Prior session notes (historical)
+
+- Earlier work verified the combined acceptance runner: it initially reused a host claim
+  (fixed by restarting disposable hosts per suite), then supplied fixture0/1/2 labels to
+  agent-sync, which requires alpha/bravo/charlie (fixed).
+- Storage subprocess-competition test can fail with empty stdout inside a sandbox; it
+  passes outside the sandbox. Default Node 20 produces the intended actionable pretest
+  error.
+- No live agent was interrupted during the tmux migration; the real self-upgrade test
+  session was explicitly cleaned up.
