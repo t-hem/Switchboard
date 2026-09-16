@@ -26,6 +26,12 @@ not automatically the browser's old scrollback. Do not promise byte replay or fu
 browser history reconstruction. Explicit historical display can be added separately.
 No terminal history is written to disk by the host/owner configuration.
 
+An attachment's terminal is the host pty, so tmux's attach-time queries (`ESC[>c`,
+`ESC[>q`) are removed from the attachment stream and left unanswered. Otherwise they
+enter the scrollback, every browser replay makes xterm.js answer them late, and tmux
+types the answer (`0;276;0c`) into the agent. Unanswered and xterm.js-answered
+attachments produce byte-identical rendering on tmux 3.2a.
+
 ## Remaining hardware checks
 
 Physical phone and Windows hardware checks remain outstanding. The Linux rollout,

@@ -7,6 +7,7 @@ import type { SessionBackend, SessionHandle, SpawnRequest } from "../backends/ty
 import { RecoveryRegistry, isRecoveryEntry, type RecoveryEntry } from "../backends/registry.js";
 import { posixOps } from "./posix.js";
 import { ptyChunkToBytes } from "../ptybytes.js";
+import { TmuxQueryFilter } from "./tmux-queries.js";
 
 type Pane = { target: string; pid: number; dead: boolean; exitCode: number | null; metadata: string };
 const command = (file: string, args: string[]): string => {
@@ -311,7 +312,12 @@ class TmuxHandle implements SessionHandle {
       env: {PATH:"/usr/bin:/bin", LANG:"C.UTF-8", TERM:"xterm-256color"},
     });
     this.#child = child;
-    child.onData(raw => { const bytes = ptyChunkToBytes(raw as unknown as string | Buffer); for (const cb of this.#data) cb(bytes); });
+    const queries = new TmuxQueryFilter();
+    child.onData(raw => {
+      const bytes = queries.push(ptyChunkToBytes(raw as unknown as string | Buffer));
+      if (bytes.length === 0) return;
+      for (const cb of this.#data) cb(bytes);
+    });
     child.onExit(() => { if (this.#child === child) this.#child = null; });
   }
   exited(code: number | null): void {
