@@ -1003,3 +1003,30 @@ Approved to proceed; see implementation entries below.
   tabs needed explicit focus for clicks. Both corrected and acceptance rerun successfully.
 - No live source crawling, applicant imports, notifications, browser jobs, child agents
   or applications were dispatched. Jobs service not yet installed as a live service.
+
+### 2026-09-16 — step 3 complete
+
+- Schema 2 adds workflow entities, immutable historical inputs, foreign keys, dedup keys,
+  audit events, task leases/generations/fences and full agent context snapshot columns.
+  Migrations from fresh and shipped schema 1 are transactional; future versions fail
+  unchanged. DATABASE.md contains generated columns, exact constraints/triggers, and
+  hand-written relationships, JSON validation boundaries and operational semantics.
+- Content-addressed artifacts flush bytes and publish without replacement before their
+  DB manifest can commit. Reads verify size/hash. Inspection reports corrupt/missing,
+  unreferenced and unfinished files; nothing is automatically garbage-collected.
+- Queue operations enforce one scheduler, current pause/enable settings, stale-result
+  fencing, bounded explicit preparation retries and unresolved-child blocks. Interrupted
+  submission work becomes unknown and cannot retry. Task changes/audit commit together.
+- Scope clarification: these are tested storage primitives. No timer or workflow worker
+  runs yet. Step 7 must wire startup child inventory, lease recovery and execution in that
+  order; step 10 adds full policy/evidence/review checks before the send-intent primitive.
+  A lease expiration or cancellation never proves a child has stopped.
+- Online SQLite backup plus immutable artifact set restores into a new directory after
+  integrity/hash verification. Restore disables/pauses jobs, fences pending work, clears
+  scheduler ownership and retains run identities for reconciliation. Credentials excluded.
+  Data CLI inspection/backup are read-only and never create/migrate a service database.
+- Verification: jobs build and all 19 tests passed, including actual SIGKILL at four
+  file/transaction boundaries, three competing processes, failed migration/audit rollback,
+  unresolved child/retry guards and backup round-trip/corruption refusal. Standalone HTTP
+  and Chromium mobile-viewport/revision-conflict acceptance passed again on schema 2.
+  No host code changed and no external work was dispatched.

@@ -51,8 +51,8 @@ locally; the richer connections UI is part of step 4.
 - Storage: built-in `node:sqlite`, verified on Node 22.23.2 / SQLite 3.51.3. This Node
   release labels it experimental; the jobs runtime is constrained to the tested minor
   line rather than assuming all Node 22 releases expose the same API. SQL uses prepared
-  statements, transactions, foreign keys and a busy timeout. Schema 1 stores settings;
-  step 3 extends durable workflow data/artifacts/leases/backup.
+  statements, transactions, foreign keys and a busy timeout. Schema 2 stores versioned settings, workflow evidence and task leases. The storage
+  APIs are implemented; workflow execution remains disabled until its later stages.
 - HTTP: Fastify **5.12.4**. Browser/PDF engine: `puppeteer-core` **25.11.0**, chosen for
   both page evidence and HTML-template PDF rendering. It does not install or start a
   browser. A compatible local Chrome/Chromium is explicitly configured when those
@@ -85,3 +85,28 @@ settings durability and zero calls to a configured network trap. Browser mode ch
 mobile viewport, save/reload, invalid input and competing-tab revision conflicts.
 Unknown database versions are refused without mutation. Physical phone/Windows tests
 are separate; this service intentionally does not support Windows.
+
+## Local data operations (schema 2)
+
+Use the same Node 22 runtime and `JOBS_DIR` as the service:
+
+```sh
+node packages/jobs/dist/data-cli.js inspect
+node packages/jobs/dist/data-cli.js backup /absolute/new/archive-directory
+node packages/jobs/dist/data-cli.js restore /absolute/archive-directory /absolute/new/data-directory
+node packages/jobs/scripts/document-schema.mjs # regenerate column reference after jobs:build
+```
+
+Inspection reports SQLite/FK errors, missing/corrupt artifacts, unfinished staging files
+and unreferenced published files; errors return a nonzero exit status. It never cleans
+up evidence automatically. Inspection/backup require an existing schema-2 database and
+do not generate credentials or migrate old data. Normal service startup performs tested
+migrations. Backups can run while the service is open; do not copy a live SQLite file
+alone. Restore verifies hashes and starts disabled/paused with pending work blocked or
+unknown until explicit reconciliation. Credentials are excluded; never start both copies
+as active schedulers against the same agents.
+
+[DATABASE.md](DATABASE.md) documents every column, SQL constraint, JSON boundary,
+relationship, publication order, task fence and recovery rule. Storage tests include
+actual killed subprocesses and competing independent SQLite connections. No crawling,
+model invocation or application delivery is enabled by this storage stage.

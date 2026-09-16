@@ -66,8 +66,23 @@ The installed Puppeteer 25 executablePath() is asynchronous. A prior browser har
 attempt supplied the printed Promise instead of the path; fixed the invocation and
 reran. No product fault was found in that failed attempt.
 
-Stage 2 is committed with this handoff entry. Next: step 3 migrations, artifact
-storage, durable tasks/leases/recovery and backup. Record its commit hash in the next
-update (a document cannot know its own containing commit hash).
-Do not start source crawling or external applications while building these foundations.
+Stage 2 is committed as `6b00ea5`. Stage 3 is verified and ready for its separate commit:
+schema 2, immutable artifacts, task/scheduler fencing, audit, data CLI and backup/restore.
+All 19 jobs tests and standalone HTTP/Chromium acceptance passed. Generated DATABASE.md
+lists every column/constraint/trigger and explains relationships/recovery/JSON boundaries.
+The schema documentation generator requires a fresh jobs build and Node 22, like jobs.
+
+Next is step 4: optional Switchboard navigation plus separate jobs dashboard/settings,
+read-only workflow lists/details/diagnostics and durable attention/review actions. Future
+execution controls must remain visibly unavailable until callers exist. The current
+queue is a library, not a running worker: step 7 must inventory children before recovery
+and dispatch, and step 10 must apply evidence/review/site policy before send intent.
+No jobs live service or external crawling/notifications/applications has been enabled.
+
+Storage implementation: `database.ts` migrates version 0/1 to 2 transactionally;
+`schema.ts` owns SQL; `artifacts.ts` publishes/fsyncs before DB references;
+`queue.ts` uses owner/generation/fence and refuses unresolved-child retries;
+`backup.ts` uses SQLite online backup + hash manifest and disabled/paused restore;
+`data-cli.ts` provides inspect/backup/restore without bootstrapping an empty service.
+Tests in `test/storage.test.ts` include real killed subprocesses and competing processes.
 Keep this handoff and DATABASE.md current as each stage changes the implementation.
