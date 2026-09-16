@@ -2,12 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { nanoid } from "nanoid";
-import * as pty from "node-pty";
+import type { SessionBackend, SessionHandle } from "./backends/types.js";
 
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
-import { platform } from "./platform/index.js";
-import { ptyChunkToBytes } from "./ptybytes.js";
+import { sessionBackend } from "./platform/index.js";
 import { RingBuffer } from "./ringbuffer.js";
 import type { HostConfig, Session } from "./types.js";
 
@@ -43,7 +42,7 @@ export class SessionError extends Error {
 
 type SessionRuntime = {
   session: Session;
-  pty: pty.IPty;
+  pty: SessionHandle;
   scrollback: RingBuffer;
   subscribers: Set<Subscriber>;
   /** Resolved when the pty actually exits, so termination can be awaited. */
@@ -77,6 +76,7 @@ export class SessionManager {
     private readonly hostConfig: HostConfig,
     private readonly registry: AgentRegistry,
     private readonly ledger: SessionLedger,
+    private readonly backend: SessionBackend = sessionBackend,
   ) {}
 
   list(): Session[] {
@@ -104,27 +104,6 @@ export class SessionManager {
     const cols = clampDimension(opts.cols, DEFAULT_COLS);
     const rows = clampDimension(opts.rows, DEFAULT_ROWS);
 
-    // How an executable is actually launched is platform business — on Windows a .cmd
-    // shim has to go through the command interpreter. See platform/win32.ts.
-    const { file, args } = platform.spawnCommand(executable, [
-      ...resolvedAgent.args,
-      ...(opts.extraArgs ?? []),
-    ]);
-
-    // The same environment object the availability probe used, so an agent can never
-    // report available and then fail to launch (or the reverse).
-    const child = pty.spawn(file, args, {
-      name: "xterm-256color",
-      cols,
-      rows,
-      cwd,
-      env: this.registry.env as Record<string, string>,
-      // Unset the encoding so onData delivers raw Buffers and PTY bytes reach the
-      // client verbatim. Honoured on POSIX only — Windows ignores it, which the
-      // onData handler below has to cope with.
-      encoding: null,
-    });
-
     const id = nanoid();
     const session: Session = {
       id,
@@ -133,12 +112,18 @@ export class SessionManager {
       label: opts.label?.trim() || `${path.basename(cwd)} · ${opts.agent}`,
       status: "running",
       exitCode: null,
-      pid: child.pid,
+      pid: 0,
       cols,
       rows,
       createdAt: Date.now(),
       lastOutputAt: Date.now(),
     };
+
+    const child = this.backend.create({
+      session, executable, args: [...resolvedAgent.args, ...(opts.extraArgs ?? [])],
+      env: this.registry.env as Record<string, string>,
+    });
+    session.pid = child.pid;
 
     const runtime: SessionRuntime = {
       session,
@@ -151,10 +136,7 @@ export class SessionManager {
     this.ledger.add({ id, pid: child.pid, agent: opts.agent, cwd, startedAt: session.createdAt });
 
     child.onData((data) => {
-      // Typed as string by node-pty, but what actually arrives depends on the
-      // platform: a Buffer on POSIX, a string on Windows. ptyChunkToBytes documents
-      // why and is the one place that interop wart is handled.
-      const chunk = ptyChunkToBytes(data as unknown as string | Buffer);
+      const chunk = data;
       runtime.scrollback.append(chunk);
       session.lastOutputAt = Date.now();
       for (const sub of runtime.subscribers) {
@@ -166,7 +148,7 @@ export class SessionManager {
       }
     });
 
-    child.onExit(({ exitCode }) => {
+    child.onExit((exitCode) => {
       session.status = "exited";
       session.exitCode = exitCode;
       session.lastOutputAt = Date.now();
@@ -277,7 +259,7 @@ export class SessionManager {
    * take.
    */
   #signal(runtime: SessionRuntime, force: boolean): void {
-    platform.killPty(runtime.pty, runtime.session.pid, force);
+    runtime.pty.signal(force);
   }
 
   #waitForExit(runtime: SessionRuntime, ms: number): Promise<boolean> {

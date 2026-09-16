@@ -1,3 +1,4 @@
+import { directBackend } from "../backends/direct.js";
 import { posixOps } from "./posix.js";
 import type { ProcessOps } from "./types.js";
 import { win32Ops } from "./win32.js";
@@ -21,3 +22,6 @@ export function identityMatches(ops: ProcessOps, pid: number, recorded: string):
   const current = ops.processIdentity(pid);
   return current !== null && current === recorded;
 }
+
+/** Backend composition stays next to platform selection; callers have no OS branches. */
+export const sessionBackend = directBackend(platform);

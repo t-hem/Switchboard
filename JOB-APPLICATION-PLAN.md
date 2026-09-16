@@ -904,3 +904,18 @@ Approved to proceed; see implementation entries below.
 - Architecture contract: LINUX-SESSIONS.md. Live daemon/config unchanged.
 - This proves feasibility, not production recovery. Next: backend seam/registry (1b).
 - Stage commit is the commit containing this entry; subsequent entries record its hash.
+
+### 2026-09-16 — step 1b foundation
+
+- Step 1a committed/pushed as `951366f`.
+- Added injected backend contracts and direct implementation; platform behavior stays
+  behind ProcessOps. Added durable recovery registry, live-owner exclusion, stale-owner
+  generation guard, validation and write/corruption tests. Production remains direct.
+- Sequencing clarification: backend settings and actual tmux spawn/recovery fault
+  injection move to 1c, where they have a real backend caller. This commit is the
+  verified foundation, not a claim that persistent production sessions already work.
+- Verification: Node 22 `npm test`, `npm run typecheck`, host build; isolated existing
+  sessions/orphans HTTP+WS acceptance via `direct-regression.mjs` (results below).
+- Both existing sessions and orphans acceptance suites passed, including explicit
+  termination, crash reconciliation and clean direct shutdown. A runner fixture initially
+  omitted workspaceRoots; corrected fixture and reran successfully. No production restart.

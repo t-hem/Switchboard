@@ -38,3 +38,18 @@ No terminal history is written to disk by the host/owner configuration.
 
 The spike's owner-stop case proves simple workload death, not containment of hostile
 or detached descendants; production cleanup must separately verify that boundary.
+
+## Backend/registry foundation (step 1b)
+
+`SessionBackend`/`SessionHandle` isolate create/input/resize/termination and transport
+ownership. The default remains direct; `ProcessOps` still handles Windows behavior.
+`RecoveryRegistry` stores versioned spawn intents/metadata with flushed atomic writes,
+exclusive process-identity ownership and preserved corrupt/unknown files. It is not
+yet wired to production sessions in this stage. A failed write never publishes new
+in-memory state or silently forgets existing records.
+
+Stale lock reclamation uses a per-owner-generation exclusive retirement marker to
+prevent two restarting daemons from deleting each other's replacement lock. An
+interrupted lock creation/reclamation fails closed: inspect the owner PID/identity and
+registry before manually removing the stale lock/retirement marker. No agent is killed
+or forgotten in that case. Retired generation markers contain no terminal data.
