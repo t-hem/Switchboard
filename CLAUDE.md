@@ -80,7 +80,9 @@ deliberately survives a closing terminal will ignore it, and the daemon will the
 report a session dead while the process keeps running. Always pass the signal
 explicitly: SIGTERM, then SIGKILL after the grace period.
 
-Shutdown must *await* termination. Exiting as soon as the signals are sent skips the
+Direct-backend shutdown must *await* termination. Linux opt-in tmux shutdown instead
+releases attachments and retains independently owned workloads; explicit deletion still
+requires verified termination (see LINUX-SESSIONS.md). Exiting as soon as the signals are sent skips the
 escalation and strands exactly the processes the shutdown was meant to clean up —
 with their ledger entries already removed, so nothing even records them.
 

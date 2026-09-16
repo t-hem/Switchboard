@@ -15,7 +15,9 @@
     "accept:sessions": "node acceptance/sessions.mjs",
     "accept:orphans": "node acceptance/orphans.mjs",
     "accept:real": "node acceptance/real-agent.mjs",
-    "accept:tmux-spike": "node acceptance/tmux-spike.mjs"
+    "accept:tmux-spike": "node acceptance/tmux-spike.mjs",
+    "accept:restart": "node acceptance/restart.mjs",
+    "recover": "node dist/recovery-cli.js"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

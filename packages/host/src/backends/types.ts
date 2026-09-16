@@ -11,7 +11,7 @@ export type SpawnRequest = {
 export interface SessionHandle {
   readonly pid: number;
   onData(callback: (bytes: Buffer) => void): void;
-  onExit(callback: (exitCode: number) => void): void;
+  onExit(callback: (exitCode: number | null) => void): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
   signal(force: boolean): void;
@@ -23,4 +23,8 @@ export interface SessionBackend {
   readonly name: "direct" | "tmux";
   readonly persistent: boolean;
   create(request: SpawnRequest): SessionHandle;
+  recover?(): { session: Session; handle: SessionHandle }[];
+  save?(session: Session): void;
+  forget?(id: string): void;
+  close?(): void;
 }

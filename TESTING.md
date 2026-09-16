@@ -354,3 +354,37 @@ will otherwise waste time:
 
 Use a throwaway `SWITCHBOARD_DIR` for anything automated so it never touches
 `~/.switchboard`.
+
+## Linux persistent sessions (2026-09-16, step 1c)
+
+Build with Node 22 first, then from the repository root run:
+
+```sh
+node packages/host/acceptance/restart.mjs
+node packages/host/acceptance/direct-regression.mjs
+```
+
+The restart suite needs the real user systemd bus, tmux 3.2+ and PTY access; run outside
+restricted process/network namespaces. It uses disposable services, private config and
+port 17889, with no production config changes. Direct regression uses port 17888.
+Do not run multiple copies of either suite concurrently. Failure diagnostics include
+only fixture registry/process/screen/service data; cleanup is limited to its own units.
+
+The persistent suite checks stable IDs/PIDs and live input after SIGTERM/SIGKILL,
+exit while the host is absent, missing/corrupt registry, socket loss, isolated detached
+workload cleanup, repeated immediate exits, controller exclusion, interrupted spawn,
+scope incarnation mismatch and owner loss. Scope generation checks complement the
+existing ProcessOps PID reuse tests. `DELETE` keeps its existing asynchronous 204
+contract: acceptance waits for disappearance from the inventory; 204 alone is not
+proof of termination. A failed cleanup remains visible with a recovery error.
+
+The HTTP backend is still direct until step 1d migration is explicitly recorded.
+Browser reconnect/takeover/resize with the persistent backend, a real coding-agent
+self-upgrade, phone use and real Windows hardware checks are not implied by these
+server tests. Windows remains on its original direct path.
+
+This machine also has a `switchboard-web.timer` that rebuilds the served web bundle
+from source every two minutes. Pause it while editing/testing UI changes to avoid
+publishing unfinished source; restore it after the verified UI build/rollout. It was
+paused during step 1c. A temporary `--outDir` permits web build checks without replacing
+the live served bundle.

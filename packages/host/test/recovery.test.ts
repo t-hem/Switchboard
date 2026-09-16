@@ -7,7 +7,7 @@ import { RecoveryRegistry, type RecoveryEntry } from "../src/backends/registry.t
 import { posixOps } from "../src/platform/posix.ts";
 
 const entry: RecoveryEntry = {
-  backend: "tmux", ownerId: "owner", target: "sw-example", scope: "sw-example.scope",
+  backend: "tmux", ownerId: "owner", target: "sw-owner-example", scope: "sw-owner-example.scope",
   phase: "starting", processIdentity: null,
   session: {id: "example", agent: "bash", cwd: "/tmp", label: "test", status: "running", exitCode: null,
     pid: 0, cols: 80, rows: 24, createdAt: 1, lastOutputAt: 1},
@@ -53,6 +53,8 @@ test("failed write never publishes new metadata or forgets existing intent", {sk
 test("invalid ownership target cannot be persisted", {skip: process.platform !== "linux"}, () => temporary(dir => {
   const registry = new RecoveryRegistry(dir, posixOps);
   assert.throws(() => registry.put({...entry, target: "user-session; kill-server"}));
+  assert.throws(() => registry.put({...entry, session: {...entry.session, id: "../escape"}}));
+  assert.throws(() => registry.put({...entry, scope: "sw-other.scope"}));
   registry.close();
 }));
 

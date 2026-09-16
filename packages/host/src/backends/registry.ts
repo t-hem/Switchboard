@@ -12,6 +12,7 @@ export type RecoveryEntry = {
   scope: string;
   phase: "starting" | "running" | "exited" | "terminating" | "unavailable";
   processIdentity: string | null;
+  scopeIdentity?: string;
   error?: string;
 };
 
@@ -27,7 +28,9 @@ export function isRecoveryEntry(value: unknown): value is RecoveryEntry {
     typeof e["scope"] === "string" && /^sw-[a-zA-Z0-9_-]+\.scope$/.test(e["scope"]) &&
     ["starting", "running", "exited", "terminating", "unavailable"].includes(String(e["phase"])) &&
     (e["processIdentity"] === null || typeof e["processIdentity"] === "string") &&
-    !!s && typeof s === "object" && typeof s["id"] === "string" &&
+    (e["scopeIdentity"] === undefined || typeof e["scopeIdentity"] === "string") &&
+    !!s && typeof s === "object" && typeof s["id"] === "string" && /^[a-zA-Z0-9_-]+$/.test(s["id"]) &&
+    e["target"] === `sw-${e["ownerId"]}-${s["id"]}` && e["scope"] === `${e["target"]}.scope` &&
     typeof s["agent"] === "string" && typeof s["cwd"] === "string" && typeof s["label"] === "string" &&
     ["running", "exited"].includes(String(s["status"])) && finite(s["pid"]) &&
     finite(s["cols"]) && finite(s["rows"]) && finite(s["createdAt"]) && finite(s["lastOutputAt"]) &&

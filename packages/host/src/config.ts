@@ -79,8 +79,19 @@ export function loadHostConfig(): { config: HostConfig; created: boolean } {
   const token = typeof raw["token"] === "string" && raw["token"] ? raw["token"] : null;
   if (!token) throw new Error(`${file} has no "token" — delete the file to regenerate it`);
 
+  const backend = raw["sessionBackend"] ?? "direct";
+  if (backend !== "direct" && backend !== "tmux") throw new Error("sessionBackend must be direct or tmux");
+  const tmux = raw["tmux"];
+  if (backend === "tmux" && (!isRecord(tmux) || typeof tmux["socketPath"] !== "string" ||
+      !path.isAbsolute(tmux["socketPath"]) || typeof tmux["ownerId"] !== "string" ||
+      !/^[a-zA-Z0-9_-]{8,64}$/.test(tmux["ownerId"]))) {
+    throw new Error("tmux requires an absolute socketPath and an 8–64 character ownerId");
+  }
+
   return {
     config: {
+      sessionBackend: backend,
+      tmux: backend === "tmux" ? tmux as HostConfig["tmux"] : undefined,
       port: typeof raw["port"] === "number" ? raw["port"] : DEFAULT_PORT,
       token,
       hostLabel: typeof raw["hostLabel"] === "string" ? raw["hostLabel"] : os.hostname(),

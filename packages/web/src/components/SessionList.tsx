@@ -67,6 +67,8 @@ export function SessionList({
                       </>
                     )}
                   </span>
+                  {session.backend === "tmux" && <span className="block text-xs text-neutral-500">survives host restart</span>}
+                  {session.recovery && <span className="block text-xs text-amber-400">{session.recovery}</span>}
                 </span>
                 {reachable && (
                   <span

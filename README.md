@@ -184,7 +184,9 @@ exactly before anything is signalled. An entry that cannot be verified is droppe
 killed.
 
 This is process bookkeeping, not session history: it holds no scrollback and nothing
-about the work. A clean shutdown kills its own sessions and leaves the ledger empty.
+about the work. A clean direct-backend shutdown kills its sessions and leaves this
+ledger empty. The opt-in Linux tmux backend uses a separate recovery registry and
+retains workloads across HTTP shutdown; see LINUX-SESSIONS.md.
 
 ## Configuration
 
@@ -404,3 +406,11 @@ packages/web    React + Vite + Tailwind static client (xterm.js)
   src/components/         session list, terminal, modals, banners
   acceptance/             browser-driven acceptance
 ```
+
+## Linux session recovery
+
+An opt-in tmux backend can retain Linux agents across HTTP daemon restarts. It requires
+an independently supervised tmux owner and per-session systemd user scopes. See
+[LINUX-SESSIONS.md](LINUX-SESSIONS.md) for configuration, display guarantees and offline
+recovery, and [JOB-APPLICATION-PLAN.md](JOB-APPLICATION-PLAN.md) for rollout status.
+The default/direct backend and Windows still terminate sessions during shutdown.

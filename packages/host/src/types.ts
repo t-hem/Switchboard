@@ -14,6 +14,8 @@ export type Session = {
   rows: number;
   createdAt: number;
   lastOutputAt: number;
+  backend?: "direct" | "tmux";
+  recovery?: string;
 };
 
 /** Per-platform override block, keyed by `process.platform`. */
@@ -52,6 +54,8 @@ export type HostConfig = {
   pathPrepend: string[];
   /** Extra environment variables for spawned agents. Machine-local. */
   env: Record<string, string>;
+  sessionBackend?: "direct" | "tmux";
+  tmux?: { socketPath: string; ownerId: string };
 };
 
 export type HealthResponse = {

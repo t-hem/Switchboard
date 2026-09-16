@@ -15,6 +15,8 @@ export type Session = {
   rows: number;
   createdAt: number;
   lastOutputAt: number;
+  backend?: "direct" | "tmux";
+  recovery?: string;
 };
 
 export type AgentInfo = { name: string; available: boolean };

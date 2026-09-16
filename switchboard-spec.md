@@ -14,7 +14,10 @@ terminate-on-restart. Jobs and the future review loop are separate same-reposito
 applications, accessed through optional UI links and generic HTTP contracts. They own
 their persistence and dependencies; the host never loads their business logic. This
 overrides older wording below requiring pipelines to live outside this repository.
-Until the backend stages are complete, existing sessions still use direct PTYs.
+The opt-in backend is implemented and verified in isolated tests; production migration
+is tracked separately as step 1d. See LINUX-SESSIONS.md for configuration/recovery.
+Persistent streams contain tmux-rendered output; reconnect reconstructs the current
+screen, not the previous daemon's raw byte ring or full browser scrollback.
 
 ## 1. What this is
 

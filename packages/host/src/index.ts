@@ -54,13 +54,12 @@ async function main(): Promise<void> {
     console.log("");
   }
 
-  // A clean shutdown takes its own sessions with it, so the ledger is left empty and
-  // the next start has no orphans to report. Only a crash leaves survivors.
+  // Direct sessions terminate; persistent sessions release only their attachments.
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`\n${signal} — killing ${sessions.count} session(s) and shutting down`);
+    console.log(`\n${signal} — shutting down (${config.sessionBackend ?? "direct"} backend, ${sessions.count} sessions)`);
     // Await the kills: exiting early would skip the SIGKILL escalation and strand the
     // very processes this is meant to clean up, with their ledger entries already gone.
     void (async () => {

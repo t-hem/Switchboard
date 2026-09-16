@@ -919,3 +919,32 @@ Approved to proceed; see implementation entries below.
 - Both existing sessions and orphans acceptance suites passed, including explicit
   termination, crash reconciliation and clean direct shutdown. A runner fixture initially
   omitted workspaceRoots; corrected fixture and reran successfully. No production restart.
+
+### 2026-09-16 — step 1c backend and isolated acceptance complete
+
+- Step 1b committed/pushed as `06d3193`. This stage's commit contains this entry.
+- Added Linux-only tmux backend, opt-in machine-local settings, scoped workloads with
+  durable start gates and scope incarnation guards, registry/tmux reconciliation,
+  retained failure inventory, nullable real exit status, offline recovery CLI, and UI
+  persistence/recovery indicators. Windows/direct behavior remains behind ProcessOps.
+- Verification with Node 22.23.2: `npm test`, `npm run typecheck`, host build, web build
+  into `/tmp/switchboard-web-recovery-check`, `direct-regression.mjs`, and the expanded
+  `restart.mjs` all passed. Restart acceptance covers SIGTERM/SIGKILL, stable ID/PID,
+  geometry, input/redraw, exit while offline, registry loss/corruption, socket loss,
+  24 immediate nonzero exits, controller exclusion, interrupted spawn, scope generation
+  mismatch/retained failed cleanup, detached descendants and replacement owner cleanup.
+- Stress testing found an actual tmux 3.2a unreaped-zombie/exit-status race. The backend
+  waits for reaping, nudges only the verified tmux parent with SIGCHLD when needed,
+  and reads fresh status. It never converts unknown status into success. Also fixed
+  the empty-owner `list-panes` error that initially blocked cleanup after owner loss.
+- `DELETE` retains its asynchronous API contract; tests now wait for inventory removal.
+  Recovery instructions and limitations are in LINUX-SESSIONS.md and TESTING.md.
+- Sequencing clarification: actual browser/phone reconnect, real coding-agent upgrade,
+  offline interactive CLI and deployment crash-window checks remain explicit 1d gates.
+  The spawn gate is fault-injected here; this does not claim exhaustive kill-at-every-
+  instruction crash testing. Synchronous local reconciliation is bounded but not a
+  high-session-count performance design.
+- Production remains direct, with no live sessions observed during the preflight check.
+  No production restart yet. The machine's automatic web rebuild timer was paused
+  while editing UI and must be restored during verified rollout. User reference zip
+  archives remain untracked and untouched. No jobs/review-loop implementation yet.

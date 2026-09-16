@@ -6,7 +6,8 @@ import type { SessionBackend, SessionHandle } from "./backends/types.js";
 
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
-import { sessionBackend } from "./platform/index.js";
+import { createSessionBackend } from "./platform/index.js";
+import { configDir } from "./config.js";
 import { RingBuffer } from "./ringbuffer.js";
 import type { HostConfig, Session } from "./types.js";
 
@@ -17,7 +18,7 @@ const KILL_ESCALATION_MS = 2000;
 
 export type Subscriber = {
   onData: (chunk: Buffer) => void;
-  onExit: (exitCode: number) => void;
+  onExit: (exitCode: number | null) => void;
 };
 
 export type CreateOptions = {
@@ -71,13 +72,16 @@ function clampDimension(value: number | undefined, fallback: number): number {
 
 export class SessionManager {
   readonly #sessions = new Map<string, SessionRuntime>();
+  #shuttingDown = false;
 
   constructor(
     private readonly hostConfig: HostConfig,
     private readonly registry: AgentRegistry,
     private readonly ledger: SessionLedger,
-    private readonly backend: SessionBackend = sessionBackend,
-  ) {}
+    private readonly backend: SessionBackend = createSessionBackend(hostConfig, configDir()),
+  ) {
+    for (const { session, handle } of backend.recover?.() ?? []) this.#register(session, handle);
+  }
 
   list(): Session[] {
     return [...this.#sessions.values()].map((r) => r.session);
@@ -92,6 +96,7 @@ export class SessionManager {
   }
 
   create(opts: CreateOptions): Session {
+    if (this.#shuttingDown) throw new SessionError("Host is shutting down", 503);
     const resolvedAgent = this.registry.resolved(opts.agent);
     if (!resolvedAgent) throw new SessionError(`unknown agent: ${opts.agent}`, 400);
 
@@ -119,12 +124,28 @@ export class SessionManager {
       lastOutputAt: Date.now(),
     };
 
-    const child = this.backend.create({
-      session, executable, args: [...resolvedAgent.args, ...(opts.extraArgs ?? [])],
-      env: this.registry.env as Record<string, string>,
-    });
+    let child: SessionHandle;
+    try {
+      child = this.backend.create({
+        session, executable, args: [...resolvedAgent.args, ...(opts.extraArgs ?? [])],
+        env: this.registry.env as Record<string, string>,
+      });
+    } catch (err) {
+      // A failed create can leave a durable interrupted intent. Surface it immediately.
+      for (const recovered of this.backend.recover?.() ?? []) {
+        if (!this.#sessions.has(recovered.session.id)) this.#register(recovered.session, recovered.handle);
+      }
+      throw err;
+    }
     session.pid = child.pid;
 
+    this.#register(session, child);
+    console.log(`[session ${id}] spawned ${opts.agent} (pid ${child.pid}) in ${cwd}`);
+    return session;
+  }
+
+  #register(session: Session, child: SessionHandle): void {
+    const id = session.id;
     const runtime: SessionRuntime = {
       session,
       pty: child,
@@ -133,7 +154,7 @@ export class SessionManager {
       exitWaiters: new Set(),
     };
     this.#sessions.set(id, runtime);
-    this.ledger.add({ id, pid: child.pid, agent: opts.agent, cwd, startedAt: session.createdAt });
+    if (!this.backend.persistent) this.ledger.add({ id, pid: child.pid, agent: session.agent, cwd: session.cwd, startedAt: session.createdAt });
 
     child.onData((data) => {
       const chunk = data;
@@ -154,7 +175,8 @@ export class SessionManager {
       session.lastOutputAt = Date.now();
       // The ledger entry is cleared here rather than when a kill is *requested*, so a
       // process that refuses to die stays on record and is reported as an orphan.
-      this.ledger.remove(id);
+      if (!this.backend.persistent) this.ledger.remove(id);
+      this.backend.save?.(session);
       for (const sub of runtime.subscribers) {
         try {
           sub.onExit(exitCode);
@@ -164,11 +186,9 @@ export class SessionManager {
       }
       for (const waiter of runtime.exitWaiters) waiter();
       runtime.exitWaiters.clear();
-      console.log(`[session ${id}] ${opts.agent} exited with code ${exitCode}`);
+      console.log(`[session ${id}] ${session.agent} exited with code ${exitCode}`);
     });
 
-    console.log(`[session ${id}] spawned ${opts.agent} (pid ${child.pid}) in ${cwd}`);
-    return session;
   }
 
   write(id: string, data: string): void {
@@ -192,6 +212,7 @@ export class SessionManager {
     }
     runtime.session.cols = c;
     runtime.session.rows = r;
+    this.backend.save?.(runtime.session);
   }
 
   /**
@@ -206,7 +227,7 @@ export class SessionManager {
     const replay = runtime.scrollback.read();
     runtime.subscribers.add(sub);
     if (replay.length > 0) sub.onData(replay);
-    if (runtime.session.status === "exited") sub.onExit(runtime.session.exitCode ?? 0);
+    if (runtime.session.status === "exited") sub.onExit(runtime.session.exitCode);
     return () => {
       runtime.subscribers.delete(sub);
     };
@@ -223,13 +244,16 @@ export class SessionManager {
    */
   kill(id: string): Promise<void> {
     const runtime = this.#require(id);
-    this.#sessions.delete(id);
-
     if (runtime.session.status === "exited") {
+      this.backend.forget?.(id);
       this.ledger.remove(id);
+      this.#sessions.delete(id);
       return Promise.resolve();
     }
-    return this.#terminate(runtime);
+    return this.#terminate(runtime).then(() => {
+      this.backend.forget?.(id);
+      this.#sessions.delete(id);
+    });
   }
 
   async #terminate(runtime: SessionRuntime): Promise<void> {
@@ -248,7 +272,8 @@ export class SessionManager {
       /* already gone */
     }
     if (!(await this.#waitForExit(runtime, KILL_ESCALATION_MS))) {
-      console.error(`[session ${id}] pid ${runtime.session.pid} survived SIGKILL; left in the ledger`);
+      runtime.session.recovery = "Termination not confirmed; session retained for retry";
+      throw new Error(runtime.session.recovery);
     }
   }
 
@@ -278,11 +303,16 @@ export class SessionManager {
   }
 
   /**
-   * Kill every session and wait for them to go. A daemon restart kills its sessions
-   * (spec §4.2); doing it properly is what keeps a clean shutdown from leaving
-   * untracked strays behind.
+   * Direct backends terminate and await children. Persistent backends release only
+   * attachments; the independently supervised owner retains the workload.
    */
   async shutdown(): Promise<void> {
+    this.#shuttingDown = true;
+    if (this.backend.persistent) {
+      for (const runtime of this.#sessions.values()) runtime.pty.disconnect();
+      this.backend.close?.();
+      return;
+    }
     await Promise.all(
       [...this.#sessions.keys()].map((id) =>
         this.kill(id).catch((err: unknown) => console.error(`[session ${id}] kill failed:`, err)),

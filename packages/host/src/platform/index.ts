@@ -1,3 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
+import type { HostConfig } from "../types.js";
+import type { SessionBackend } from "../backends/types.js";
+import { LinuxTmuxBackend } from "./linux-tmux.js";
 import { directBackend } from "../backends/direct.js";
 import { posixOps } from "./posix.js";
 import type { ProcessOps } from "./types.js";
@@ -24,4 +29,17 @@ export function identityMatches(ops: ProcessOps, pid: number, recorded: string):
 }
 
 /** Backend composition stays next to platform selection; callers have no OS branches. */
-export const sessionBackend = directBackend(platform);
+export function createSessionBackend(config: HostConfig, dir: string): SessionBackend {
+  if (config.sessionBackend === "tmux") {
+    if (process.platform !== "linux") throw new Error("tmux session backend is Linux-only; use direct on this platform");
+    return new LinuxTmuxBackend(config, dir);
+  }
+  const file = path.join(dir, "persistent-sessions.json");
+  if (process.platform === "linux" && fs.existsSync(file)) {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { entries?: unknown[] };
+    if (!Array.isArray(raw.entries) || raw.entries.length) {
+      throw new Error("Persistent sessions exist; restore tmux config and explicitly remove them before selecting direct");
+    }
+  }
+  return directBackend(platform);
+}
