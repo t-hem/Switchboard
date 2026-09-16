@@ -120,6 +120,97 @@ ok("tput reports the resized width", await waitForTerm(`COLS=${after[0]?.cols}`)
 await page.setViewport({ width: 1280, height: 800 });
 await sleep(800);
 
+console.log("\n=== the desktop scrollbar is not touch-only ===");
+// It used to be gated behind pointer:coarse, which left a desktop with no working
+// scroll wheel unable to move through the buffer at all — and ↓ Latest never
+// appeared either, because nothing could scroll away from the bottom to summon it.
+//
+// The thumb renders only when there is something to scroll (`maxScroll <= 1` returns
+// null), so the buffer has to be filled past a screenful before asking.
+const noThumbYet = await page.$('[data-testid="terminal-scrollbar-thumb"]');
+ok("no thumb while everything fits on screen", noThumbYet === null);
+
+await page.click(".xterm-screen");
+await page.keyboard.type("seq 1 200");
+await page.keyboard.press("Enter");
+ok("buffer filled past a screenful", await waitForTerm("200"), (await termText()).slice(-60));
+await sleep(600);
+
+const thumb = await page.evaluate(() => {
+  const el = document.querySelector('[data-testid="terminal-scrollbar-thumb"]');
+  if (!el) return { present: false };
+  return { present: true, visible: el.offsetParent !== null && el.getBoundingClientRect().width > 0 };
+});
+ok("scrollbar thumb exists at desktop width", thumb.present, JSON.stringify(thumb));
+ok("scrollbar thumb is actually rendered", thumb.visible === true, JSON.stringify(thumb));
+
+console.log("\n=== the sidebar collapses and comes back ===");
+const asideWidth = () => page.evaluate(() => {
+  const el = document.querySelector("aside");
+  return el ? el.getBoundingClientRect().width : -1;
+});
+ok("sidebar starts visible", (await asideWidth()) > 0, `width ${await asideWidth()}`);
+await page.click('[aria-label="Collapse sidebar"]');
+await sleep(400);
+ok("collapsing hides the sidebar", (await asideWidth()) === 0, `width ${await asideWidth()}`);
+ok("a control to bring it back is present", (await page.$('[aria-label="Show sessions"]')) !== null);
+await page.click('[aria-label="Show sessions"]');
+await sleep(400);
+ok("expanding restores the sidebar", (await asideWidth()) > 0, `width ${await asideWidth()}`);
+
+console.log("\n=== Ctrl-Z must never reach the pty ===");
+// A session runs the agent directly with no shell, so SIGTSTP suspends it with no
+// job control anywhere to resume it — `fg` goes to a stopped process that is not
+// reading. That cost a real six-hour session. `cat -v` is the witness: it stays
+// alive and echoing only if the chord never arrived.
+await page.click(".xterm-screen");
+await page.keyboard.type("cat -v");
+await page.keyboard.press("Enter");
+await sleep(800);
+await page.keyboard.type("ALIVE_BEFORE");
+await page.keyboard.press("Enter");
+ok("cat is echoing", await waitForTerm("ALIVE_BEFORE"), (await termText()).slice(-120));
+
+await page.keyboard.down("Control");
+await page.keyboard.press("KeyZ");
+await page.keyboard.up("Control");
+await sleep(500);
+ok("no ^Z reached the pty", !(await termText()).includes("^Z"), (await termText()).slice(-120));
+await page.keyboard.type("ALIVE_AFTER_CTRL_Z");
+await page.keyboard.press("Enter");
+ok("cat still running after Ctrl-Z", await waitForTerm("ALIVE_AFTER_CTRL_Z"), (await termText()).slice(-120));
+
+console.log("\n=== Ctrl-C copies with a selection, interrupts without one ===");
+// Both meanings are load-bearing: interrupting an agent mid-turn is the most used
+// key in this client, and copying is the only reason the chord is intercepted.
+const box = await page.evaluate(() => {
+  const r = document.querySelector(".xterm-screen").getBoundingClientRect();
+  return { x: r.x, y: r.y, w: r.width, h: r.height };
+});
+await page.mouse.move(box.x + 10, box.y + 10);
+await page.mouse.down();
+await page.mouse.move(box.x + box.w * 0.6, box.y + 40, { steps: 10 });
+await page.mouse.up();
+await sleep(300);
+await page.keyboard.down("Control");
+await page.keyboard.press("KeyC");
+await page.keyboard.up("Control");
+await sleep(500);
+await page.keyboard.type("ALIVE_AFTER_COPY");
+await page.keyboard.press("Enter");
+ok("Ctrl-C with a selection did not interrupt", await waitForTerm("ALIVE_AFTER_COPY"), (await termText()).slice(-120));
+
+// Clear the selection, then the same chord must reach the pty as SIGINT and kill cat.
+await page.mouse.click(box.x + 10, box.y + box.h - 10);
+await sleep(300);
+await page.keyboard.down("Control");
+await page.keyboard.press("KeyC");
+await page.keyboard.up("Control");
+await sleep(1000);
+await page.keyboard.type("echo BACK_AT_THE_SHELL");
+await page.keyboard.press("Enter");
+ok("Ctrl-C without a selection interrupted cat", await waitForTerm("BACK_AT_THE_SHELL"), (await termText()).slice(-160));
+
 console.log("\n=== status dot and reconnect ===");
 await sleep(6000);
 const dotTitle = await page.evaluate(() =>

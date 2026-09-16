@@ -3,8 +3,18 @@
 These drive the **built client in a real Chromium** against **real daemons** — no
 mocks, no stubs. They cover the parts of the spec that otherwise need a human.
 
-- `ui.mjs` (phase 2): setup screen, session list, new-session modal, attaching to a
-  terminal, typing into the pty, reflow on resize, killing a session.
+- `ui.mjs` (phase 2, plus the desktop work of 2026-09-15): setup screen, session
+  list, new-session modal, attaching to a terminal, typing into the pty, reflow on
+  resize, the desktop scrollbar, collapsing and restoring the sidebar, the key
+  handler (Ctrl-Z never reaching the pty; Ctrl-C copying with a selection and
+  interrupting without one), and the two-step confirm before a session is killed.
+  A live `cat -v` is the witness for the key handler: it keeps echoing only if the
+  chord never arrived.
+
+  **Restart the daemon between runs.** A finished run leaves its `clientId` holding
+  the claim, and the next run's browser is a different client, so its WebSocket
+  upgrade is refused with 403 and every assertion downstream of attaching fails.
+  That is the lock working, not a flake.
 - `multi-host.mjs` (phase 3): three daemons on three ports, a live session on each,
   driving all three from one browser, then `SIGKILL`ing the middle one and checking
   the other two stay fully usable while the third is marked offline. Also covers
