@@ -269,7 +269,20 @@ export function useTerminal({
         // repaints from the buffer either way, so the clear buys nothing here.
         const dims = fit.proposeDimensions();
         if (dims && Number.isFinite(dims.cols) && Number.isFinite(dims.rows)) {
-          if (dims.cols !== term.cols || dims.rows !== term.rows) term.resize(dims.cols, dims.rows);
+          if (dims.cols !== term.cols || dims.rows !== term.rows) {
+            // Changing the width rewraps every wrapped line in the buffer, which
+            // changes how many rows the history occupies. xterm keeps the scroll
+            // *offset*, so a view that was pinned to the newest output is left
+            // however many rows the rewrap added above it — the bounce, and the
+            // apparent extra line break, is the newest line being pushed out of
+            // view and then arriving back when output next lands.
+            //
+            // Re-pin in the same turn as the resize, so the two are one paint
+            // rather than a jump and a correction.
+            const wasAtBottom = atBottomRef.current;
+            term.resize(dims.cols, dims.rows);
+            if (wasAtBottom) term.scrollToBottom();
+          }
         }
         lastSize = { cols: term.cols, rows: term.rows };
         return lastSize;
