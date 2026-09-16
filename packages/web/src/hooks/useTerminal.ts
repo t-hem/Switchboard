@@ -291,9 +291,28 @@ export function useTerminal({
     };
 
     let resizeTimer: number | null = null;
+    let resizeFrame: number | null = null;
+    // The box the terminal was last fitted to.
+    //
+    // FitAddon blanks the screen — `_renderService.clear()` — before any resize that
+    // changes the computed rows or columns, so every avoidable fit is a visible
+    // flash. Two in a row, with the rows briefly spread apart between them, is one
+    // fit that measured the box mid-layout followed by the one that got it right.
+    // Recording what was actually fitted avoids both: measure only on a frame the
+    // browser has already laid out, and only when the box really moved.
+    let fittedTo = { width: host.clientWidth, height: host.clientHeight };
+
     const observer = new ResizeObserver(() => {
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(sendSize, RESIZE_DEBOUNCE_MS);
+      resizeTimer = window.setTimeout(() => {
+        if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => {
+          if (closedRef.current) return;
+          if (host.clientWidth === fittedTo.width && host.clientHeight === fittedTo.height) return;
+          fittedTo = { width: host.clientWidth, height: host.clientHeight };
+          sendSize();
+        });
+      }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(host);
 
@@ -398,6 +417,7 @@ export function useTerminal({
       outputWaitersRef.current = [];
       if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       viewportElement?.removeEventListener("touchstart", stopTouch);
       viewportElement?.removeEventListener("touchmove", stopTouch);
