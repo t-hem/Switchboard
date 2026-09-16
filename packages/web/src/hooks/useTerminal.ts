@@ -190,6 +190,14 @@ export function useTerminal({
      * with a selection it copies, without one it is still an interrupt. That split
      * matters — interrupting an agent mid-turn is the single most used key here.
      *
+     * Ctrl-A is deliberately NOT handled. Selecting the terminal buffer with
+     * `selectAll()` does not match what the chord does everywhere else in a browser:
+     * the handler only runs when the terminal has focus, so the same key selected
+     * the whole page the rest of the time, which is worse than either behaviour
+     * alone. Left alone it sends ^A — readline's beginning-of-line, the terminal's
+     * own meaning — and still selects the page when focus is elsewhere. Tried and
+     * reverted 2026-09-15; drag-select plus Ctrl-C is the path that works.
+     *
      * Ctrl-Z is swallowed outright. A session runs the agent directly with no shell,
      * so SIGTSTP suspends it with no job control anywhere to resume it — `fg` goes
      * to a stopped process that is not reading. The session is simply lost, which is
@@ -204,11 +212,6 @@ export function useTerminal({
         void navigator.clipboard?.writeText(term.getSelection()).catch(() => {
           /* clipboard refused; the selection is still there to copy by hand */
         });
-        event.preventDefault();
-        return false;
-      }
-      if (key === "a" && !event.shiftKey) {
-        term.selectAll();
         event.preventDefault();
         return false;
       }
