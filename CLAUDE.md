@@ -25,6 +25,15 @@ away.
 Build in the phases in §7, one at a time. After each phase: verify the acceptance
 criteria, then commit and push to `master` so the phase is reviewable as a diff.
 
+## Approved next implementation
+
+`JOB-APPLICATION-PLAN.md` is approved (2026-09-16). Start with Linux tmux
+session recovery, retaining Windows shutdown behavior. Verify and commit each stage
+before continuing; the operator authorized continued work without phase-review pauses.
+Jobs and the later review loop are separate same-repository apps calling HTTP APIs;
+Switchboard never imports their runtime dependencies or databases. These are narrow
+revisions to the older spec's outside-repository and restart-kills-all assumptions.
+
 ## Invariants
 
 ### `agents.json` is fleet-wide and must stay portable

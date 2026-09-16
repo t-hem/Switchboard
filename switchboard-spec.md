@@ -6,6 +6,16 @@ This document is the complete specification for an agent to implement. Read the 
 
 ---
 
+## Approved extension (2026-09-16)
+
+See `JOB-APPLICATION-PLAN.md` for the approved next stages and current implementation
+status. Linux gains an opt-in tmux session backend; Windows retains direct PTYs and
+terminate-on-restart. Jobs and the future review loop are separate same-repository
+applications, accessed through optional UI links and generic HTTP contracts. They own
+their persistence and dependencies; the host never loads their business logic. This
+overrides older wording below requiring pipelines to live outside this repository.
+Until the backend stages are complete, existing sessions still use direct PTYs.
+
 ## 1. What this is
 
 A personal control plane for terminal coding agents running across several machines.
