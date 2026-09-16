@@ -211,27 +211,45 @@ export function useTerminal({
     const scrollSub = term.onScroll(syncAtBottom);
     const renderSub = term.onRender(syncAtBottom);
 
+    // The last size this client successfully measured. Kept because a fit can fail
+    // (a container with no layout yet) at exactly the moment the size is needed.
+    let lastSize: { cols: number; rows: number } | null = null;
+
     const safeFit = (): { cols: number; rows: number } | null => {
       if (!host.clientWidth || !host.clientHeight) return null;
       try {
         fit.fit();
-        return { cols: term.cols, rows: term.rows };
+        lastSize = { cols: term.cols, rows: term.rows };
+        return lastSize;
       } catch {
         return null;
       }
     };
     safeFit();
 
+    /**
+     * Tell the daemon how big this client's terminal is.
+     *
+     * The pty has one size, and it is whatever the last attached client said. So a
+     * session started on a phone keeps that phone's width until something tells it
+     * otherwise — which is why this has to fire reliably on *attach*, not only when
+     * a window is dragged.
+     *
+     * Falls back to the last good measurement: on a fresh mount the container often
+     * has no layout yet, `fit()` measures nothing, and sending nothing at all would
+     * leave the pty at the previous device's width for the life of the session.
+     */
+    const sendSize = (): void => {
+      const socket = socketRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      const size = safeFit() ?? lastSize;
+      if (size) socket.send(JSON.stringify({ type: "resize", ...size }));
+    };
+
     let resizeTimer: number | null = null;
     const observer = new ResizeObserver(() => {
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => {
-        const size = safeFit();
-        const socket = socketRef.current;
-        if (size && socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "resize", ...size }));
-        }
-      }, RESIZE_DEBOUNCE_MS);
+      resizeTimer = window.setTimeout(sendSize, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(host);
 
@@ -255,8 +273,17 @@ export function useTerminal({
         // The scrollback replay that follows is the full history; clear first so a
         // reconnect repaints rather than appends.
         term.reset();
-        const size = safeFit();
-        if (size) socket.send(JSON.stringify({ type: "resize", ...size }));
+        // Adopt this client's size immediately: the pty may still be sized for
+        // whichever device attached last, and a TUI redrawing at the wrong width
+        // writes over the lines below it rather than simply looking narrow.
+        sendSize();
+        // ...and again once the browser has laid the container out. On a fresh
+        // mount the measurement above can happen before the element has any size,
+        // and the ResizeObserver's own first callback may already have run and been
+        // discarded while this socket was still connecting.
+        requestAnimationFrame(() => {
+          if (!closedRef.current) sendSize();
+        });
       };
 
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
