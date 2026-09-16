@@ -340,13 +340,17 @@ committed unit would be wrong on every other one. Three things are worth copying
 whenever you set this up on a new Linux box:
 
 - **Run the built output, not `npm run dev:host`.** `dev:host` is `tsx watch`, which
-  restarts on source changes — on a long-running daemon that kills every live PTY
-  session the moment a file is edited. Build first (about a second), then run
-  `packages/host/dist/index.js`, so a `git pull` also cannot leave it quietly serving
-  stale JavaScript.
+  restarts on source changes — on a long-running daemon using the default direct
+  backend, that kills every live PTY session the moment a file is edited. (Under the
+  opt-in Linux tmux backend a restart only drops the daemon's attachments; the tmux
+  server independently owns the agent processes, so they keep running.) Build first
+  (about a second), then run `packages/host/dist/index.js`, so a `git pull` also cannot
+  leave it quietly serving stale JavaScript.
 - **`exec` the daemon** from any wrapper script, so the init system supervises `node`
-  itself. Otherwise SIGTERM reaches the wrapper and the daemon's shutdown — which
-  signals each PTY and *awaits* termination — never runs.
+  itself. Otherwise SIGTERM reaches the wrapper and the daemon's shutdown never runs —
+  on the direct backend that shutdown signals each PTY and *awaits* termination; on the
+  tmux backend it releases attachments and leaves the independently owned workloads
+  running for the next daemon to recover.
 - **`KillMode=mixed`.** systemd's default signals the whole cgroup, which kills the
   agent processes out from under the daemon and strands their ledger entries. Only the
   daemon should get the signal; it cleans up its own children.
