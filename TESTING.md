@@ -277,8 +277,18 @@ lands directly on the primary way the client is meant to be used.
       focus it**, and that is left alone deliberately: it matches the behaviour of the
       terminal this is being compared against, and a focus-follows-click change would
       be a change for its own sake. Revisit only if it actually gets in the way.
-- [ ] **The sidebar collapse** (`☰`, desktop only) and the **drag thumb at desktop
-      width**, both added 2026-09-15 and neither covered by `ui.mjs`.
+- [x] **The drag thumb and ↓ Latest at desktop width — verified 2026-09-15.** The
+      thumb is always present and scrolls the buffer; ↓ Latest appears whenever the
+      view is not at the bottom. Note it keys off "not at the bottom" rather than off
+      scrolling past a threshold, which is indistinguishable in use. Both were
+      previously phone-only, and with a dead scroll wheel there was no way to move
+      through the buffer on the desktop at all.
+- [x] **Killing and deleting, with confirmation — verified 2026-09-15.** `✕` →
+      *Really kill?* on a running session, and Ctrl-C twice to exit followed by
+      *Delete* → *Really delete?* on the exited row. Both arm on the first click and
+      act on the second.
+- [ ] **The sidebar collapse** (`☰`, desktop only) works, but see the known defect
+      below — resizing the terminal is what exposes it. Not covered by `ui.mjs`.
 
 ---
 
