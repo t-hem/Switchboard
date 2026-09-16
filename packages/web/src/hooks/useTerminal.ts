@@ -262,7 +262,15 @@ export function useTerminal({
     const safeFit = (): { cols: number; rows: number } | null => {
       if (!host.clientWidth || !host.clientHeight) return null;
       try {
-        fit.fit();
+        // Deliberately not `fit.fit()`. That is exactly the two lines below with a
+        // `_renderService.clear()` in front, and the clear is the flash: it blanks
+        // the screen before every resize that changes the geometry, so collapsing
+        // the sidebar wipes the terminal on the way to being wider. The resize
+        // repaints from the buffer either way, so the clear buys nothing here.
+        const dims = fit.proposeDimensions();
+        if (dims && Number.isFinite(dims.cols) && Number.isFinite(dims.rows)) {
+          if (dims.cols !== term.cols || dims.rows !== term.rows) term.resize(dims.cols, dims.rows);
+        }
         lastSize = { cols: term.cols, rows: term.rows };
         return lastSize;
       } catch {
