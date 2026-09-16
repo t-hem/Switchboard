@@ -265,14 +265,53 @@ used it. The phone is fine with the input bar standing between the keyboard and 
 pty; the desktop has no such buffer, so anything wrong with focus or pointer handling
 lands directly on the primary way the client is meant to be used.
 
-- [ ] **Click the terminal and type.** Keystrokes reach the pty in order, with no
-      duplication, no dropped characters and no jumbling. This is the desktop
-      equivalent of the phone finding above, and the one most likely to hurt: there is
-      no input bar to fall back on.
+- [x] **Click the terminal and type — verified 2026-09-15.** Typed at full speed
+      (~100 wpm) against streaming output with no duplication, dropped characters or
+      jumbling. The phone's IME finding does not have a hardware-keyboard equivalent.
+- [x] **Selection and copy/paste — verified 2026-09-15.** Drag-select works, Ctrl-C
+      copies when there is a selection and interrupts when there is not, Ctrl-V
+      pastes. All three needed `attachCustomKeyEventHandler`; xterm sends every Ctrl
+      chord to the pty as a control byte by default, so none of them worked before.
 - [ ] **Clicking works in general** — selecting a session in the list, the
-      new-session modal, the kill button, and click-to-focus on the terminal itself.
-- [ ] **Selection and copy/paste.** Dragging selects, and Ctrl/Cmd-V pastes into the
-      pty rather than being swallowed as a keystroke.
+      new-session modal, the kill button. **Click-to-focus on the terminal does not
+      focus it**, and that is left alone deliberately: it matches the behaviour of the
+      terminal this is being compared against, and a focus-follows-click change would
+      be a change for its own sake. Revisit only if it actually gets in the way.
+- [ ] **The sidebar collapse** (`☰`, desktop only) and the **drag thumb at desktop
+      width**, both added 2026-09-15 and neither covered by `ui.mjs`.
+
+---
+
+## Known defects — recorded, not being worked on
+
+Real, reproduced, and judged not worth more time than they have already had. Written
+down so they are not rediscovered from scratch, and so nobody re-runs the eliminations.
+
+### Resize flashes, and wrapped text bounces · low priority
+
+Resizing the terminal — collapsing or expanding the sidebar is the usual way —
+sometimes flashes, and wrapped lines visibly bounce and briefly gain an extra line
+break before settling.
+
+**Only happens when something on screen is wrapped.** Widen the window until nothing
+wraps and both the flash and the bounce go away entirely. That is the strongest clue
+about where it lives.
+
+Three causes were found and fixed, and none of them was this one:
+
+- `FitAddon.fit()` calls `_renderService.clear()` before any resize that changes the
+  geometry, blanking the screen first. Replaced with `proposeDimensions()` plus
+  `terminal.resize()`, which is the same work without the clear (`8b1c014`).
+- A second fit was running against a mid-layout box, producing one wrong result and
+  then a correct one — two flashes, and the spread-apart rows in between. The fit now
+  runs on a laid-out frame and is skipped when the box has not moved (`51fefa3`).
+- Nothing re-pinned the view after a rewrap, so a terminal pinned to the newest output
+  was left sitting above it. Now re-pinned in the same turn as the resize (`1f10d88`).
+
+What remains is xterm rewrapping the buffer and painting an intermediate state, which
+is not something this client drives. The remaining levers are all worse than the
+defect: shrink the scrollback, swap in the canvas or WebGL renderer addon, or cover
+the terminal during a resize. Leave it unless it starts costing something real.
 
 ---
 
