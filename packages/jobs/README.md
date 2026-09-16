@@ -182,6 +182,26 @@ node packages/jobs/acceptance/library.mjs
 JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/library.mjs
 ```
 
+## Personas and agent invocation (step 7a)
+
+The shared, machine-local persona convention and the jobs-owned invocation/tool contract
+are implemented, but **the personas and tools are placeholders**. `GET /api/personas`
+reports the configured directory (`personaDirectory` in settings, default
+`~/.switchboard/personas`), each persona's agent/model/tools/skills, per-persona errors,
+the scoped tool catalogue and the invocation adapters. A malformed persona is reported
+without taking the list or the service down. This route never spawns an agent.
+
+**Read [PERSONAS.md](PERSONAS.md) for exactly what must be replaced or built for a real
+run** — real persona prose, a verified model id per machine, and above all the **tool
+bridge** that exposes `src/tools.ts` to an agent process. Until that bridge exists the
+model cannot call the tools, and a prompt-only tool list is not an enforced restriction.
+Placeholders ship in `packages/jobs/personas/`; the live copies are machine-local under
+`~/.switchboard/personas/` and are never fleet-synced.
+
+```sh
+node packages/jobs/acceptance/personas.mjs
+```
+
 ## Local data operations (schema 3)
 
 Use the same Node 22 runtime and `JOBS_DIR` as the service:

@@ -1178,3 +1178,47 @@ Approved to proceed; see implementation entries below.
 - Not done here: no PDF, no persona/model call (step 7), no resume review/approval gate
   wiring, no application submission. Template rendering accepts only validated data; the
   model never writes arbitrary markup.
+
+### 2026-09-16 — step 7a complete (persona snapshots, invocation and scoped tools)
+
+- Step 6 committed/pushed on branch `step6-resume-library` as `6ba9806`
+  (`feat(jobs): version bullet-based resumes and render structured text`). This
+  checkpoint's commit is the branch head of `step7a-personas-tools`, stacked on step 6.
+- **Operator decision (2026-09-16):** use placeholder personas and tools for now, model
+  `openrouter/deepseek/deepseek-v4.1-flash` via OpenRouter (verified present with
+  `pi --list-models`). Real persona/tool/bridge work is documented in
+  [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md).
+- `personas.ts` implements the shared machine-local convention: `manifest.md` frontmatter
+  plus prompt body, `skills/<name>/SKILL.md`, strict subset validation, path containment,
+  per-persona failure isolation and directory-absence as an empty state. `snapshotPersona`
+  composes persona + selected skills + task into one immutable task file and records
+  manifest/skill/composed revision hashes; the DB snapshot is the historical evidence, so
+  editing or deleting the files never changes an old run.
+- `tools.ts` implements the scoped assembly tool contract against validated library
+  revisions (`list_templates`, `find_bullets`, `select_bullet`, `order_sections`,
+  `render_preview`, `finalize_resume`) over a run-scoped `DraftState`. It rejects unknown
+  templates/sections/bullets, duplicates, slot-limit overflow, invalid orders and
+  unrenderable drafts. The model cannot invent bullets, prose or markup.
+- `resume.ts` was refactored so the deterministic renderer and the tool-driven draft share
+  one validated section builder; a finalized tool result persists through
+  `ResumeRenderer.persist` as an explicit-selection render version.
+- `invocation.ts` defines `AgentInvocationAdapter` with capabilities and a registry.
+  `PiInvocationAdapter` builds the one-shot argv (`--model`, `--mode json`, `--no-session`,
+  `--print`, `--tools`, optional `--thinking`/`--extension`, `@<task file>`), returns the
+  jobs-owned result path and parses JSON stdout as a fallback only. The real `--mode json`
+  envelope and the tool bridge remain explicitly unverified.
+- Committed placeholder personas for the two required passes:
+  `resume-assembler` (selects approved bullets; may not rewrite) and `resume-editor`
+  (rewrites prose only; may not re-select). No `resume-checker` yet; it is optional.
+- `personas-api.ts` adds read-only `GET /api/personas`: the configured directory, each
+  persona's agent/model/tools/skills, per-persona errors, the tool catalogue and the
+  invocation adapters. No agent is spawned by this route.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 57 jobs tests (7 new across
+  personas, tools and invocation) and 74 host tests; root typecheck.
+  `node packages/jobs/acceptance/personas.mjs` passed (auth, two valid personas with the
+  configured model and tool exposure, malformed-persona isolation, empty state).
+  `library.mjs`, `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass.
+- Not done here (tracked in PERSONAS.md and the plan): the tool bridge that exposes
+  `tools.ts` to a real agent process; confirming the CLI JSON envelope; any real model
+  run; the two-pass workflow and decision logging (7b); spawner idempotency/host
+  recovery (7c). A prompt-only tool list is **not** claimed as an enforced restriction.

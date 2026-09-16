@@ -12,8 +12,9 @@ A second agent joined on 2026-09-16. Until then everything was committed directl
 to directly.
 
 - Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
-  **`step5-posting-capture`** (step 5) and **`step6-resume-library`** (step 6), each
-  stacked on the previous. All push to `origin`.
+  **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6) and
+  **`step7a-personas-tools`** (step 7a), each stacked on the previous. All push to
+  `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -56,7 +57,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–6
+## Jobs stages 2–7a
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -82,7 +83,15 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   evidence, browser capture via an injected page backend, SQLite source registry +
   discovery runs, authenticated import/source API, and jobs-ui import/source controls.
   See the plan's "step 5 complete" log entry for the full verification.
-- **Step 6** (verified, on branch `step6-resume-library`): immutable career-library
+- **Step 7a** (verified, on branch `step7a-personas-tools`): machine-local persona
+  loading/validation with path containment and per-persona failure isolation, immutable
+  persona/skill/task snapshots, the scoped assembly tools over a run draft, the
+  `AgentInvocationAdapter` contract with a `pi` argv builder, committed **placeholder**
+  personas (`resume-assembler`, `resume-editor`) using `openrouter/deepseek/deepseek-v4.1-flash`,
+  and read-only `GET /api/personas`. **Read [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)
+  for exactly what the real personas/tools still need** — especially the tool bridge,
+  which does not exist yet, so the tools are not yet enforceable against a live model.
+- **Step 6** (verified, on branch `step6-resume-library`, commit `6ba9806`): immutable career-library
   revisions (profile facts separated from suggestions, bullets, base templates with
   bullet slots), deterministic and explainable bullet selection, structured text
   resume rendering with visible omissions, authenticated library/render API, JSON
@@ -109,6 +118,10 @@ passed; root typecheck and 74 host tests passed.
 Chromium; `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass. `DATABASE.md`
 regenerates identically (no schema change).
 
+Step 7a verification (Node 22.23.2, Linux): jobs build/typecheck and 57 jobs tests
+passed; root typecheck and 74 host tests passed. `node packages/jobs/acceptance/personas.mjs`
+passed; `library.mjs`, `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass.
+
 Commands (Node 22 on PATH):
 
 ```sh
@@ -133,14 +146,18 @@ The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harnes
 attempt supplied the printed Promise instead of the path, which was fixed. The browser
 harness explicitly focuses tabs before clicking.
 
-## Next: step 7 — Switchboard agent tailoring and structured results
+## Next: step 7b then 7c — two-pass workflow, then spawner recovery
 
-Read step 7 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) before starting.
-The operator confirmed the shape: 1–3 base resumes with bullet slots, a first pass
-built by an **assembly persona** and then fully tailored by an **edit persona**, both
-saved separately. Jobs owns the agent runner and the persona/tool adapters; the host
-daemon never reads personas. Prompts and tool schemas/versions are snapshotted into
-SQLite at run time. Page text is untrusted input, never instructions.
+**7b** wires the two required passes: an assembly run that calls the scoped tools and a
+separate edit run over the assembled resume, both saved with their own structured result,
+`tool_events`/`run_messages`, the diff between assembly and edit, and human decisions.
+**7c** adds the host-side idempotency/recovery contract (intent recorded before spawn,
+rediscovery after timeout, reconnect instead of re-spawn) and the linked-retry behaviour.
+
+Both must keep the operator's placeholder decision in mind: personas and tools are
+placeholders, the model is `openrouter/deepseek/deepseek-v4.1-flash`, and the **tool
+bridge** plus the verified CLI JSON envelope are prerequisites for any real smoke
+(see [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)).
 
 Still outstanding from earlier stages, deliberately: no live board smoke test, no
 employer form automation, **no PDF output** (deferred until a real need appears), no
