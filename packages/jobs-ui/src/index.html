@@ -1,10 +1,27 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Job applications</title><link rel="stylesheet" href="/style.css"></head><body>
-<main><h1>Job applications</h1><p>Local settings and records. This early build does not search, start agents, or submit applications.</p>
+<main><h1>Job applications</h1><p>Local settings and records. This build imports and captures job postings with saved evidence; it does not start agents, notify, or submit applications.</p>
 <form id="connect"><label>Jobs service token <input id="token" type="password" autocomplete="off" required></label><button>Connect</button><button id="disconnect" type="button">Forget token</button></form>
 <p id="message" role="status"></p>
 <section id="dashboard" hidden><h2>Overview</h2><p id="workflow-state"></p>
-<div class="actions"><button id="refresh-dashboard">Refresh dashboard</button><button disabled>Search unavailable</button><button disabled>Start agent unavailable</button><button disabled>Submit unavailable</button></div>
+<div class="actions"><button id="refresh-dashboard">Refresh dashboard</button><button disabled>Start agent unavailable</button><button disabled>Submit unavailable</button></div>
 <p id="counts"></p><p>Lists show up to 100 records. Reviews record decisions against saved inputs; they do not start work in this build.</p>
+<h2>Import a posting</h2>
+<p id="capture-availability"></p>
+<form id="import-url"><label>Posting URL <input id="import-url-value" type="url" required placeholder="https://boards.example.com/company/jobs/123"></label>
+<label>Company <input id="import-company" required maxlength="200"></label><label>Job title (optional) <input id="import-title" maxlength="300"></label>
+<div class="actions"><button id="capture-submit">Capture posting</button><span>Stores exact text plus a full-page screenshot.</span></div></form>
+<details><summary>Manual text import (no screenshot evidence)</summary>
+<form id="import-manual"><label>Posting URL <input id="manual-url" type="url" required></label><label>Company <input id="manual-company" required maxlength="200"></label>
+<label>Job title <input id="manual-title" maxlength="300"></label><label>Posting text <textarea id="manual-text" rows="6" required></textarea></label>
+<div class="actions"><button>Record text only</button></div></form></details>
+<h2>Sources</h2><div id="sources"></div>
+<details><summary>Add or update a source</summary>
+<form id="source-form"><label>Source id <input id="source-id" required pattern="[a-z0-9][a-z0-9._-]*" maxlength="64"></label>
+<label>Adapter <select id="source-adapter"></select></label><label>Source key <input id="source-key" required maxlength="200"></label>
+<label>Company name <input id="source-company" required maxlength="200"></label><label>Board / company identifier <input id="source-board" required maxlength="200"></label>
+<label><input id="source-enabled" type="checkbox"> Enabled (discovery runs only when enabled)</label>
+<div class="actions"><button>Save source</button></div></form></details>
+<h2>Discovery runs</h2><div id="runs"></div>
 <h2>Needs your attention</h2><div id="attention"></div>
 <h2>Child agents</h2><div id="agents"></div><h2>Tasks</h2><div id="tasks"></div>
 <h2>Jobs</h2><div id="jobs"></div><h2>Applications</h2><div id="applications"></div>
@@ -12,7 +29,7 @@
 <section id="record" hidden tabindex="-1"><h2 id="record-title"></h2><div id="record-links" class="actions"></div><pre id="record-data"></pre>
 <form id="decision" hidden><label>Reason or requested changes<textarea id="reason" rows="3" maxlength="10000"></textarea></label>
 <div class="actions"><button name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button><button name="decision" value="request_changes">Request changes</button></div></form></section>
-<details><summary>Data diagnostics</summary><p>Integrity results are cached for 60 seconds. Loading an expired snapshot scans the local store.</p><button id="diagnostics">Load diagnostics</button><pre id="diagnostics-data"></pre></details>
+<details id="diagnostics-details"><summary>Data diagnostics</summary><p>Integrity results are cached for 60 seconds. Loading an expired snapshot scans the local store.</p><button id="diagnostics">Load diagnostics</button><pre id="diagnostics-data"></pre></details>
 </section>
 <section id="settings" hidden><h2>Settings</h2><p id="state"></p><p>All current settings are editable below. Every review gate starts on. Enabling jobs records your preference; workers remain unavailable in this build.</p>
 <label for="editor">Settings JSON</label><textarea id="editor" spellcheck="false" rows="24"></textarea><div class="actions"><button id="save">Save settings</button><button id="reload">Reload saved settings</button><button id="export">Export settings</button><label>Import JSON <input id="import" type="file" accept="application/json"></label></div>

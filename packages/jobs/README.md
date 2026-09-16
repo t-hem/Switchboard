@@ -20,11 +20,18 @@ Open `http://127.0.0.1:7780`. Copy the jobs token from the private
 `~/.local/share/switchboard-jobs/service.json` into the client connection field. It is
 separate from the host token. Logs never print it. `JOBS_DIR` overrides the jobs data
 location at startup; moving a live database through settings is not supported.
-Service bootstrap (`port`, token, exact `allowedOrigins`) is machine-local and takes
-effect on restart. Keep the file private. The server binds loopback; a phone requires
-a separate tailnet HTTPS endpoint and its exact origin in `allowedOrigins`. No
-external endpoint is provisioned by this scaffold. No applicant data goes into client
-storage; the client stores only its connection token.
+Service bootstrap (`port`, token, exact `allowedOrigins`, plus the optional
+`browserExecutablePath` and `allowPrivateImport`) is machine-local and takes effect on
+restart. Keep the file private. The server binds loopback; a phone requires a separate
+tailnet HTTPS endpoint and its exact origin in `allowedOrigins`. No external endpoint
+is provisioned by this scaffold. No applicant data goes into client storage; the
+client stores only its connection token.
+
+`browserExecutablePath` points at an already-installed Chrome/Chromium; without it URL
+capture is reported unavailable (409) and manual text import still works. It is never
+downloaded or started at install time. `allowPrivateImport` defaults to **false** and
+refuses loopback/private/link-local targets for both fetching and browser navigation;
+only an isolated local fixture should set it true.
 
 The jobs service works with Switchboard stopped. Its scheduler shell performs no
 network calls and starts no processes. Spawner observation is an injected interface;
@@ -106,6 +113,40 @@ settings durability and zero calls to a configured network trap. Browser mode ch
 mobile viewport, save/reload, invalid input and competing-tab revision conflicts.
 Unknown database versions are refused without mutation. Physical phone/Windows tests
 are separate; this service intentionally does not support Windows.
+
+## Posting import and capture (step 5)
+
+`GET /api/sources` lists registered adapters (with version and per-action
+capabilities), configured sources and capture availability. `PUT /api/sources/:id`
+validates and stores a source (`adapterId`, `sourceKey`, `config`, `enabled`); an
+unknown adapter is rejected before any work exists, and `enabled` is operator intent —
+saving config never silently enables a source. `POST /api/sources/:id/discover` runs one
+discovery pass for an enabled source, archives each raw response as a
+`source-response` artifact, and records the run. A partial/failed scan is stored as
+`blocked`/`failed` and closes nothing.
+
+Imports never create an application attempt and never submit anything:
+
+- `POST /api/import/manual` records operator-pasted text as a `partial` snapshot with
+  no screenshot and an explicit `manual` provenance note.
+- `POST /api/import/url` renders the posting in the configured browser, stores the
+  exact text plus a full-page PNG artifact, and records `complete` only when the text
+  is substantive and no `data-capture-incomplete` marker is present. Missing browser →
+  409 `browser_unavailable`; refused target → 400 `url_not_permitted`; exhausted
+  retries → 503 `capture_failed`.
+
+Dedup is on a canonicalized URL (host lowercased, query sorted, tracking parameters
+and fragments stripped, trailing slash removed) and ignores the transport scheme, so a
+redirect or the same canonical URL from two sources produces one posting and one
+application. Evidence is write-once: `job_snapshots` cannot be updated or deleted, so a
+posting that later changes or disappears stays archived. Snapshot text is rendered as
+text only; captured markup is never executed.
+
+```sh
+# Real-browser import/capture acceptance against a deterministic local fixture site.
+# It enables allowPrivateImport for that fixture only; the strict service asserts refusal.
+JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/capture.mjs
+```
 
 ## Local data operations (schema 3)
 

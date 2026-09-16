@@ -78,7 +78,7 @@ try{
  assert.equal(queue.get('approve').state,'waiting_review');
  const download=await fetch(`${jobsUrl}/api/artifacts/${artifact.hash}`,{headers:{Authorization:`Bearer ${token}`}});
  assert.equal(await download.text(),'Exact saved resume fixture');
- await phone.click('summary');await phone.click('#diagnostics');await until(async()=> (await phone.$eval('#diagnostics-data',e=>e.textContent)).includes('checkedAt'),'diagnostics');
+ await phone.click('#diagnostics-details summary');await phone.click('#diagnostics');await until(async()=> (await phone.$eval('#diagnostics-data',e=>e.textContent)).includes('checkedAt'),'diagnostics');
  // A second device disables work against the same authoritative settings.
  await desktop.bringToFront();await desktop.$eval('#editor',e=>{const s=JSON.parse(e.value);s.enabled=true;s.paused=false;e.value=JSON.stringify(s);});
  await desktop.click('#save');await until(async()=>store.current().value.enabled,'enable preference');

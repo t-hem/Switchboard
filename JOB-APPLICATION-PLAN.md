@@ -1072,3 +1072,62 @@ Approved to proceed; see implementation entries below.
   this verification; production core bundle then rebuilt from the committed source.
 - No live jobs service, source crawl, child agent, notification or application was
   enabled or dispatched. No host/runtime behavior changed beyond optional navigation.
+
+### 2026-09-16 — step 5 complete (posting import and evidence capture)
+
+- Step 4 committed/pushed on branch `step4-jobs-dashboard` as `3cb8811`
+  (`feat(web): add isolated job settings and dashboard`). This stage's commit is the
+  branch head of `step5-posting-capture`; `master` was intentionally left at `3cc5add`
+  because a second agent joined and stage work now happens on branches.
+- `adapters/source.ts` defines the `JobSourceAdapter` contract (discover/normalize plus
+  versioned per-action capabilities) and a registry factory that rejects unknown
+  providers before any work exists. First implementations: `greenhouse` (public board
+  API, HTML→text normalization) and `fixture` (deterministic local alternate). The same
+  contract assertions run against both; no provider type leaks into workflow state
+  beyond the preserved raw payload.
+- `net.ts` adds an SSRF guard for every operator/adapter URL: http(s) only, no
+  credentials, private/loopback/link-local/ULA/mapped-v4 addresses refused, DNS results
+  checked, and each redirect re-checked (`redirect: manual`, five hops). `allowPrivate`
+  exists only for the isolated local fixture and defaults false. `withRetries` retries
+  only explicitly retryable failures with bounded attempts.
+- `postings.ts` canonicalizes URLs (lowercased host, sorted query, tracking params and
+  fragments stripped, trailing slash removed) and dedups on the scheme-insensitive
+  canonical form, so an http→https redirect or a shared canonical URL from two sources
+  yields one posting and one application. Snapshots are write-once, dedup within the
+  same capture method/version, gate "complete" on non-empty text (and a screenshot for
+  application preflight), and promote an application only from `discovered` to
+  `captured`. `job_snapshots` immutability keeps changed/deleted postings archived.
+- `capture.ts` captures through a real browser via an injected page backend: bounded
+  lazy-load scrolling, `data-capture-incomplete`/short-text detection, full-page PNG,
+  final-URL redirect re-check, and bounded retries. Nothing fabricates a success when
+  capture fails.
+- `sources.ts`/`discovery.ts` store the live source registry in SQLite and run
+  discovery per enabled source, archiving complete raw responses as artifacts. A partial
+  or failed scan is recorded as `blocked`/`failed` and never closes postings; a cap is
+  visible, never silent.
+- `postings-api.ts` exposes authenticated `GET/PUT /api/sources`,
+  `POST /api/sources/:id/discover`, `POST /api/import/manual` (text only, explicitly no
+  screenshot evidence) and `POST /api/import/url` (browser capture). An unavailable
+  browser (409 `browser_unavailable`) or a refused/disabled source is reported with its
+  code; adapter `SourceError`s map to 400/503 by retryability rather than a generic 500.
+- `packages/jobs-ui` adds the import forms, source enable/disable and Discover actions,
+  discovery-run status, and shows snapshot/screenshot evidence. Untrusted text renders
+  through `textContent` only; captured markup never executes.
+- Machine bootstrap (`service.json`) gains optional `browserExecutablePath` and
+  `allowPrivateImport`; both are validated and private. `/api/status` reports the real
+  `capture` capability, and `/api/dashboard` now includes recent discovery runs.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck, 45 jobs tests (9 new across
+  HTML/net/HTTP, adapters, postings and capture), root typecheck and 74 host tests.
+  `node packages/jobs/acceptance/capture.mjs` with real Chromium passed: exact text +
+  PNG screenshot stored, redirect/tracking-param dedup, changed-then-deleted posting
+  still archived, lazy/partial content stored but not promoted, manual import with no
+  screenshot, unreachable page → 503 `capture_failed` after bounded retries, loopback
+  target refused (400 `url_not_permitted`) without the fixture switch, registry
+  discovery dedup, a partial scan that closed nothing, and archived markup not
+  executing in the dashboard. `scaffold.mjs` and `dashboard.mjs` (dashboard + `ui`,
+  `claim`, `agent-sync`) still pass. `DATABASE.md` regenerates identically (no schema
+  change in this step).
+- Not done here: no live board smoke test was run, no browser automation of employer
+  forms, no applicant facts/resumes, no notifications and no application submission.
+  The scheduled-search worker and classification/filtering remain step 8; submission
+  policy remains steps 9–10.

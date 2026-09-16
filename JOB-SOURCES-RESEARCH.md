@@ -232,3 +232,21 @@ SmartRecruiters: api.smartrecruiters.com/v1/companies/{co}/postings
 You maintain a company list (a few hundred slugs), poll every few hours, diff against what you've seen. This is the highest-signal, lowest-fragility layer and it's maybe 200 lines.
 
 For breadth on top of that: Adzuna and USAJOBS have free real APIs, HN "Who's Hiring" via the Algolia API, RemoteOK/Arbeitnow for remote. For the consumer boards, JobSpy pulls LinkedIn, Indeed, Glassdoor, Google, and ZipRecruiter into one normalized DataFrame, but it works until it gets blocked and you'll need proxies for LinkedIn. Treat it as a bonus source, not a dependency.
+
+## Implementation status (2026-09-16)
+
+Step 5 landed the plumbing this document assumes, but **no live source has been
+exercised**. Implemented: the `JobSourceAdapter` contract with versioned capabilities
+and a registry factory; the Greenhouse adapter (public board API, `content=true`,
+HTML→text normalization, `absolute_url` as canonical); a deterministic `fixture`
+adapter implementing the same contract; canonical-URL dedup and write-once snapshot
+evidence; an SSRF guard with an explicit local-fixture exception; and a SQLite source
+registry with discovery runs that archive raw responses and never close postings on a
+partial scan.
+
+Still outstanding before a source is considered usable: configured slugs/terms review
+for the starter companies, a permitted low-volume live smoke test per adapter, the
+Lever/Ashby/SmartRecruiters/Workable adapters (steps 5/8 as separate verified commits),
+scheduled search and classification (step 8), and the JobSpy worker (still optional,
+with LinkedIn/Indeed defaulting to disabled/manual import). Adapters for restricted
+aggregators, if ever added, need a recorded terms review first.

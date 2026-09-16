@@ -14,6 +14,7 @@ export function dashboardRoutes(app:FastifyInstance,store:SettingsStore,dir:stri
     tasks:db.prepare("SELECT id,kind,state,attempt,max_attempts,updated_at FROM tasks ORDER BY updated_at DESC LIMIT 100").all(),
     agents:db.prepare("SELECT id,task_id,state,agent,model,spawner_provider,spawner_instance,spawner_session_id,created_at,finished_at FROM agent_runs ORDER BY created_at DESC LIMIT 100").all(),
     jobs:db.prepare("SELECT id,company,title,location,canonical_url,last_seen_at FROM jobs ORDER BY last_seen_at DESC LIMIT 100").all(),
+    searchRuns:db.prepare("SELECT r.id,r.source_id,s.source_key,s.adapter_id,r.state,r.created_at,r.finished_at,r.error_json FROM search_runs r JOIN sources s ON s.id=r.source_id ORDER BY r.created_at DESC LIMIT 100").all(),
     applications:db.prepare("SELECT a.id,a.job_id,a.state,a.block_reason,j.company,j.title,a.updated_at FROM applications a JOIN jobs j ON j.id=a.job_id ORDER BY a.updated_at DESC LIMIT 100").all()
   }));
   // Full verification is expensive; repeated HTTP requests share one snapshot.
@@ -48,7 +49,8 @@ export function dashboardRoutes(app:FastifyInstance,store:SettingsStore,dir:stri
   app.get<{Params:{id:string}}>("/api/jobs/:id",async(req)=>{
     const job=db.prepare("SELECT * FROM jobs WHERE id=?").get(req.params.id);
     if(!job)throw new AppError("job_missing","Job not found",404);
-    return {job,snapshots:db.prepare("SELECT * FROM job_snapshots WHERE job_id=? ORDER BY captured_at DESC LIMIT 100").all(req.params.id)};
+    return {job,snapshots:db.prepare("SELECT * FROM job_snapshots WHERE job_id=? ORDER BY captured_at DESC LIMIT 100").all(req.params.id),
+      aliases:db.prepare("SELECT a.source_id,a.external_id,a.original_url,s.adapter_id,s.source_key FROM job_aliases a JOIN sources s ON s.id=a.source_id WHERE a.job_id=?").all(req.params.id)};
   });
   app.get<{Params:{id:string}}>("/api/applications/:id",async(req)=>{
     const application=db.prepare("SELECT * FROM applications WHERE id=?").get(req.params.id);

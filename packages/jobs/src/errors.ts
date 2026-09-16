@@ -4,3 +4,10 @@ export class AppError extends Error {
     super(message);
   }
 }
+
+/** Adapter-boundary failure with an explicit retryability decision. Never silently retried. */
+export class SourceError extends Error {
+  constructor(readonly code: string, message: string, readonly retryable: boolean) {
+    super(message);
+  }
+}

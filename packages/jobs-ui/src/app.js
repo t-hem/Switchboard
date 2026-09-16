@@ -1,12 +1,14 @@
 const $=id=>document.getElementById(id);
 let revision;
 let review;
+let adapters=[];
+let captureAvailable=false;
 let connectionEpoch=0;
 $('token').value=localStorage.getItem('jobs.token')??'';
 const message=text=>{$('message').textContent=text;};
 async function request(route,body,method=body?'PUT':'GET'){
  const epoch=connectionEpoch;
- const response=await fetch(route,{method,headers:{Authorization:`Bearer ${$('token').value}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+ const response=await fetch(route,{method,headers:{Authorization:`Bearer ${$('token').value}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(60000)});
  const value=await response.json();
  if(epoch!==connectionEpoch)throw new Error('Connection changed. Connect again.');
  if(!response.ok)throw new Error([value.error?.message,...(value.error?.fields??[]).map(f=>`${f.path}: ${f.message}`)].filter(Boolean).join('\n'));
@@ -20,7 +22,7 @@ async function load(){
   $('state').textContent=status.scheduler.reason;
   $('details').textContent=JSON.stringify({dataDirectory:status.dataDirectory,bootstrap:status.bootstrap,capabilities:status.capabilities},null,2);
   $('settings').hidden=false;localStorage.setItem('jobs.token',$('token').value);message('Settings loaded.');
-  await loadDashboard();
+  await Promise.all([loadDashboard(),loadSources()]);
  }catch(error){message(error.message);}
 }
 $('connect').addEventListener('submit',event=>{event.preventDefault();void load();});
@@ -54,10 +56,27 @@ async function loadDashboard(){
  list('jobs',data.jobs,r=>`${r.title} · ${r.company}`,r=>`/api/jobs/${encodeURIComponent(r.id)}`);
  list('applications',data.applications,r=>`${r.title} · ${r.company} · ${r.state}${r.block_reason?` · ${r.block_reason}`:''}`,r=>`/api/applications/${encodeURIComponent(r.id)}`);
  list('decisions',data.decisions,r=>`${r.decision} · ${r.subject_type} · ${r.reason??''}`,r=>r.attention_id?`/api/reviews/${encodeURIComponent(r.attention_id)}`:null);
+ list('runs',data.searchRuns??[],r=>`${r.source_key} · ${r.adapter_id} · ${r.state}${r.error_json?` · ${JSON.parse(r.error_json).code??''}`:''}`,()=>null);
  $('dashboard').hidden=false;
 }
+async function loadSources(){
+ const data=await request('/api/sources');adapters=data.adapters;
+ captureAvailable=data.capture.available;
+ $('capture-submit').disabled=!captureAvailable;
+ $('capture-availability').textContent=captureAvailable
+  ?(data.capture.allowPrivateImport?'Browser capture is available. Private/loopback targets are explicitly permitted for this local fixture.':'Browser capture is available. Private and loopback targets are refused.')
+  :'URL capture is unavailable: no browser executable is configured. Use manual text import, which records no screenshot evidence.';
+ const select=$('source-adapter');select.replaceChildren(...adapters.map(a=>{const o=document.createElement('option');o.value=a.id;o.textContent=`${a.id} (v${a.version})`;return o;}));
+ const root=$('sources');root.replaceChildren();
+ if(!data.sources.length){root.textContent='No sources configured.';return;}
+ for(const source of data.sources){const row=document.createElement('p');row.className='record-row';
+  row.append(document.createTextNode(`${source.sourceKey} · ${source.adapterId} · ${source.enabled?'enabled':'disabled'} · ${source.config.companyName??''} `));
+  row.append(button('Discover',async()=>{const run=await request(`/api/sources/${encodeURIComponent(source.id)}/discover`,{}, 'POST');message(`Discovery ${run.complete?'completed':'stopped early'}: ${run.discovered} postings, ${run.created} new.`);await Promise.all([loadDashboard(),loadSources()]);}));
+  row.append(button(source.enabled?'Disable':'Enable',async()=>{await request(`/api/sources/${encodeURIComponent(source.id)}`,{adapterId:source.adapterId,sourceKey:source.sourceKey,config:source.config,enabled:!source.enabled});message(source.enabled?'Source disabled.':'Source enabled.');await loadSources();}));
+  root.append(row);}
+}
 async function download(hash){
- const response=await fetch(`/api/artifacts/${hash}`,{headers:{Authorization:`Bearer ${$('token').value}`},signal:AbortSignal.timeout(15000)});
+ const response=await fetch(`/api/artifacts/${hash}`,{headers:{Authorization:`Bearer ${$('token').value}`},signal:AbortSignal.timeout(60000)});
  if(!response.ok)throw new Error('Artifact unavailable or corrupt. No download was produced.');
  const url=URL.createObjectURL(await response.blob());
  const link=document.createElement('a');link.href=url;link.download=hash;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -91,6 +110,22 @@ $('decision').onsubmit=async event=>{
   await loadDashboard();await showRecord(`/api/reviews/${encodeURIComponent(id)}`,'Saved decision');message('Decision recorded. No work was dispatched.');
  }catch(error){message(error.message);}finally{buttons.forEach(b=>b.disabled=false);}
 };
-$('refresh-dashboard').onclick=()=>void loadDashboard().catch(error=>message(error.message));
+$('import-url').onsubmit=async event=>{event.preventDefault();
+ try{const result=await request('/api/import/url',{url:$('import-url-value').value,company:$('import-company').value,title:$('import-title').value||undefined},'POST');
+  await Promise.all([loadDashboard(),showRecord(`/api/jobs/${encodeURIComponent(result.jobId)}`,'Imported posting')]);
+  message(`Captured (${result.completeness}). ${result.warning??'Text and screenshot saved as evidence.'}`);
+ }catch(error){message(error.message);}};
+$('import-manual').onsubmit=async event=>{event.preventDefault();
+ try{const result=await request('/api/import/manual',{url:$('manual-url').value,company:$('manual-company').value,title:$('manual-title').value||undefined,descriptionText:$('manual-text').value},'POST');
+  await Promise.all([loadDashboard(),showRecord(`/api/jobs/${encodeURIComponent(result.jobId)}`,'Imported posting')]);
+  message(result.warning);
+ }catch(error){message(error.message);}};
+$('source-form').onsubmit=async event=>{event.preventDefault();
+ try{const sourceKey=$('source-key').value;const id=$('source-id').value;const adapterId=$('source-adapter').value;
+  const config={sourceKey,companyName:$('source-company').value,boardId:$('source-board').value};
+  await request(`/api/sources/${encodeURIComponent(id)}`,{adapterId,sourceKey,config,enabled:$('source-enabled').checked});
+  message('Source saved. Discovery runs only when enabled.');await loadSources();
+ }catch(error){message(error.message);}};
+$('refresh-dashboard').onclick=()=>void Promise.all([loadDashboard(),loadSources()]).catch(error=>message(error.message));
 $('diagnostics').onclick=async()=>{try{$('diagnostics-data').textContent=JSON.stringify(await request('/api/diagnostics'),null,2);}catch(error){message(error.message);}};
 if($('token').value)void load();

@@ -1,15 +1,17 @@
 import fs from "node:fs";
 import { dashboardRoutes } from "./dashboard.js";
+import { postingsRoutes, type PostingsDeps } from "./postings-api.js";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
-import { AppError } from "./errors.js";
+import { AppError, SourceError } from "./errors.js";
 import { SchedulerShell } from "./scheduler.js";
 import { settingsUpdateSchema, type Settings } from "./settings.js";
 import type { SettingsStore } from "./store.js";
 
 export function buildServer(config:ServiceConfig, store:SettingsStore, dir:string,
-  uiDir = new URL("../../jobs-ui/dist/", import.meta.url)) {
+  options:{uiDir?:URL; deps?:PostingsDeps} = {}) {
+  const uiDir = options.uiDir ?? new URL("../../jobs-ui/dist/", import.meta.url);
   const app = Fastify({logger:false,bodyLimit:256*1024,ajv:{customOptions:{coerceTypes:false,removeAdditional:false,useDefaults:false}}});
   const scheduler = new SchedulerShell(store);
   app.addHook("onRequest",async(req,reply)=>{
@@ -30,12 +32,16 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.setErrorHandler<FastifyError>((error, _req, reply)=>{
     if (error instanceof AppError) return reply.code(error.status).send({error:{code:error.code,message:error.message,fields:error.fields}});
-    if (error.validation) return reply.code(400).send({error:{code:"invalid_settings",message:"Settings validation failed",fields:error.validation.map(v=>({path:v.instancePath,message:v.message??"Invalid value"}))}});
+    // Adapter-boundary failures keep their code; retryability decides the status, never a 500.
+    if (error instanceof SourceError) return reply.code(error.retryable ? 503 : 400).send({error:{code:error.code,message:error.message,fields:[]}});
+    if (error.validation) return reply.code(400).send({error:{code:"invalid_request",message:"Request validation failed",fields:error.validation.map(v=>({path:v.instancePath,message:v.message??"Invalid value"}))}});
     const status=error.statusCode && error.statusCode<500 ? error.statusCode : 500;
     return reply.code(status).send({error:{code:status===500?"internal_error":"invalid_request",message:status===500?"Operation failed; previous committed data is retained":"Invalid request",fields:[]}});
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
-  app.get("/api/status",async()=>({scheduler:scheduler.status(),dataDirectory:dir,capabilities:{settings:true,discovery:false,agents:false,applications:false},bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true}}));
+  app.get("/api/status",async()=>({scheduler:scheduler.status(),dataDirectory:dir,
+    capabilities:{settings:true,import:true,discovery:true,capture:Boolean(config.browserExecutablePath),agents:false,applications:false},
+    bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
     const url = new URL(req.body.value.spawner.baseUrl);
@@ -43,6 +49,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     return store.update(req.body.expectedRevision,req.body.value);
   });
   dashboardRoutes(app,store,dir);
+  postingsRoutes(app,store,dir,config,options.deps);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{
       const file=new URL(name,uiDir);

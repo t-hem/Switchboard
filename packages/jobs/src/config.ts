@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 
-export type ServiceConfig = {port:number; token:string; allowedOrigins:string[]};
+export type ServiceConfig = {
+  port:number; token:string; allowedOrigins:string[];
+  /** Optional machine-local browser for posting capture; absent means URL capture stays unavailable. */
+  browserExecutablePath?:string;
+  /** Only the isolated local development fixture may enable private/loopback import targets. */
+  allowPrivateImport?:boolean;
+};
 export function assertRuntime(platform = process.platform, version = process.versions.node): void {
   if (platform !== "linux") throw new Error("The jobs service is Linux-only; Switchboard itself remains cross-platform");
   if (!/^22\.23\./.test(version)) throw new Error("Jobs currently requires the verified Node 22.23.x SQLite runtime (baseline 22.23.2)");
@@ -18,5 +24,9 @@ export function loadServiceConfig(): {dir:string; config:ServiceConfig} {
       !Array.isArray(value.allowedOrigins) || value.allowedOrigins.some(origin=>{
         try { const url=new URL(origin); return !["http:","https:"].includes(url.protocol)||url.origin!==origin; } catch { return true; }
       })) throw new Error("Invalid service.json: expected port, private token (24+ characters), and exact HTTP(S) allowedOrigins");
+  if (value.browserExecutablePath !== undefined && (typeof value.browserExecutablePath !== "string" || !value.browserExecutablePath.startsWith("/")))
+    throw new Error("Invalid service.json: browserExecutablePath must be an absolute path");
+  if (value.allowPrivateImport !== undefined && typeof value.allowPrivateImport !== "boolean")
+    throw new Error("Invalid service.json: allowPrivateImport must be a boolean");
   return {dir,config:value};
 }
