@@ -148,6 +148,40 @@ text only; captured markup is never executed.
 JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/capture.mjs
 ```
 
+## Career library and resume rendering (step 6)
+
+Resumes are assembled from the operator's own bullets placed into base templates. All
+library material is stored as immutable revisions:
+
+- `GET /api/library` returns the latest revision of each profile and template, plus the
+  bullets for the latest profile revision, and reports `pdfRendering: false`.
+- `PUT /api/library/profile` stores a validated profile (`contact`, `summary`, confirmed
+  `facts`, unverified `suggestions`). Facts and suggestions are kept separate; a
+  suggestion is never rendered as a fact.
+- `PUT /api/library/bullets` stores bullet revisions (`bulletId`, `prose`, `tags`,
+  optional structured `filters`/`evidence`). Re-submitting a bullet id creates a new
+  revision rather than overwriting one.
+- `PUT /api/library/template` stores a base template whose sections are `facts`,
+  `tags`, or `bullets` with a slot `limit`. `GET /api/library/export` and
+  `POST /api/library/import` move the library between databases and only ever append.
+- `POST /api/resumes/render` (`jobSnapshotId`, optional profile/template revision)
+  selects bullets deterministically by tag overlap with the job, fills the template's
+  slots, stores a text artifact and writes a `resume_versions` row referencing the exact
+  snapshot/profile/template revisions. Missing required facts and unfilled slots appear
+  in `missing` and as an explicit omissions line. An identical re-render reuses the
+  existing version; `GET /api/resumes/:id` reads one back.
+
+**PDF is deliberately deferred.** `resume_versions.pdf_artifact_hash` exists but stays
+`NULL`; `/api/status` reports `pdf: false`. Rendering produces structured source plus
+exact text only, and the renderer accepts validated data — the model never writes
+arbitrary markup. Persona-driven first-pass assembly and full tailoring are step 7.
+
+```sh
+node packages/jobs/acceptance/library.mjs
+# Optional client check with an installed browser:
+JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/library.mjs
+```
+
 ## Local data operations (schema 3)
 
 Use the same Node 22 runtime and `JOBS_DIR` as the service:

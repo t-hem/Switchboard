@@ -1131,3 +1131,50 @@ Approved to proceed; see implementation entries below.
   forms, no applicant facts/resumes, no notifications and no application submission.
   The scheduled-search worker and classification/filtering remain step 8; submission
   policy remains steps 9–10.
+
+### 2026-09-16 — step 6 complete (bullet-based resume library and render), PDF deferred
+
+- Step 5 committed/pushed on branch `step5-posting-capture` as `ab8e2da`
+  (`feat(jobs): capture versioned postings and screenshots`). This stage's commit is the
+  branch head of `step6-resume-library`, stacked on step 5.
+- **Operator decision (2026-09-16):** resumes are assembled from **bullet points** placed
+  into 1–3 **base resume templates** that contain bullet slots. The first pass is built
+  by a persona and then fully tailored by a second persona — that two-pass model work
+  remains step 7. **PDF output is deferred** until a real need appears; this stage
+  produces a structured source plus an exact text artifact, and `resume_versions`
+  already carries a nullable `pdf_artifact_hash` for when it lands. No PDF/text-parsing
+  dependency was added.
+- `library.ts` stores immutable revisions of the operator's own material — profile facts
+  (contact, summary, `facts` separated from unverified `suggestions`), bullets
+  (`bulletId`, prose, tags, structured filters, evidence) and base templates — with
+  strict validation before storage and JSON export/import that only ever appends new
+  revisions. A malformed entry is rejected; existing history is never rewritten.
+- `resume.ts` selects bullets deterministically and explainably (tag overlap with the
+  job title/description, stable tie-break, `as-listed` alternative) and renders a
+  `StructuredResume`: heading plus template-ordered sections (`facts`, `tags`,
+  `bullets` with a slot limit). Missing required facts and unfilled slots are recorded in
+  `missing` and printed as an explicit omissions line — omissions are visible, never
+  guessed, and unverified suggestions are excluded. The render stores the text artifact
+  and a `resume_versions` row (`phase='render'`, `pdf_artifact_hash=NULL`) referencing
+  the exact snapshot/profile/template revisions; an identical re-render reuses the
+  existing version instead of duplicating evidence.
+- `library-api.ts` exposes authenticated `GET /api/library`,
+  `PUT /api/library/profile|bullets|template`, `GET /api/library/export`,
+  `POST /api/library/import`, `POST /api/resumes/render` (latest profile/template by
+  default) and `GET /api/resumes/:id`. `/api/status` reports `resumes:true`, `pdf:false`;
+  `/api/dashboard` now lists recent resume versions and job snapshots.
+- `packages/jobs-ui` adds JSON editors for profile/bullets/templates, library
+  export/import, a render form (snapshot/profile/template) and a preview showing the
+  rendered text, the omissions line and each selected bullet's matched tags. Untrusted
+  values still render as text only.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 50 jobs tests (4 new library/
+  render tests) and 74 host tests; root typecheck. `node
+  packages/jobs/acceptance/library.mjs` passed both HTTP-only and with real Chromium
+  (revisions, deterministic render, visible omissions, suggestion exclusion, reused
+  render, preserved earlier version after an edit, JSON round-trip into a fresh service,
+  deferred PDF, client preview). `capture.mjs`, `scaffold.mjs` and `dashboard.mjs`
+  (dashboard + `ui`/`claim`/`agent-sync`) still pass. `DATABASE.md` regenerates
+  identically (no schema change).
+- Not done here: no PDF, no persona/model call (step 7), no resume review/approval gate
+  wiring, no application submission. Template rendering accepts only validated data; the
+  model never writes arbitrary markup.

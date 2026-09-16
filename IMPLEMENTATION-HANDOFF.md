@@ -11,8 +11,9 @@ A second agent joined on 2026-09-16. Until then everything was committed directl
 `master`. From now on, stage work happens on a **branch** and `master` is not written
 to directly.
 
-- Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4) and
-  **`step5-posting-capture`** (step 5, stacked on step 4). Both push to `origin`.
+- Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
+  **`step5-posting-capture`** (step 5) and **`step6-resume-library`** (step 6), each
+  stacked on the previous. All push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -55,7 +56,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–5
+## Jobs stages 2–6
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -75,12 +76,19 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   (`packages/web/src/state/useJobsConnection.ts`, `components/JobsConnection.tsx`);
   standalone dashboard lists/details, review decisions, artifact downloads, cached
   diagnostics. See the plan's "step 4 complete" log entry for the full verification.
-- **Step 5** (verified, on branch `step5-posting-capture`): `JobSourceAdapter` contract
-  + registry, Greenhouse adapter, deterministic fixture adapter, SSRF-guarded HTTP
-  client, canonical-URL dedup and write-once snapshot evidence, browser capture via an
-  injected page backend, SQLite source registry + discovery runs, authenticated
-  import/source API, and jobs-ui import/source controls. See the plan's "step 5
-  complete" log entry for the full verification.
+- **Step 5** (verified, on branch `step5-posting-capture`, commit `ab8e2da`):
+  `JobSourceAdapter` contract + registry, Greenhouse adapter, deterministic fixture
+  adapter, SSRF-guarded HTTP client, canonical-URL dedup and write-once snapshot
+  evidence, browser capture via an injected page backend, SQLite source registry +
+  discovery runs, authenticated import/source API, and jobs-ui import/source controls.
+  See the plan's "step 5 complete" log entry for the full verification.
+- **Step 6** (verified, on branch `step6-resume-library`): immutable career-library
+  revisions (profile facts separated from suggestions, bullets, base templates with
+  bullet slots), deterministic and explainable bullet selection, structured text
+  resume rendering with visible omissions, authenticated library/render API, JSON
+  import/export, and a jobs-ui library editor + preview. **PDF is deferred by operator
+  decision** (`pdf_artifact_hash` stays NULL). See the plan's "step 6 complete" log
+  entry for the full verification.
 
 Step 4 verification (Node 22.23.2, Linux): `npm run jobs:build`, `npm run jobs:typecheck`,
 `npm run jobs:test` (24 tests), `npm run typecheck`, `npm test` (74 host tests) all
@@ -94,6 +102,12 @@ passed; root typecheck and 74 host tests passed.
 `JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/capture.mjs` passed
 (fixture site + real Chromium), and `scaffold.mjs` + `dashboard.mjs` still pass.
 `DATABASE.md` regenerates identically (no schema change).
+
+Step 6 verification (Node 22.23.2, Linux): jobs build/typecheck and 50 jobs tests
+passed; root typecheck and 74 host tests passed.
+`node packages/jobs/acceptance/library.mjs` passed both HTTP-only and with real
+Chromium; `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass. `DATABASE.md`
+regenerates identically (no schema change).
 
 Commands (Node 22 on PATH):
 
@@ -119,18 +133,19 @@ The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harnes
 attempt supplied the printed Promise instead of the path, which was fixed. The browser
 harness explicitly focuses tabs before clicking.
 
-## Next: step 6 — local applicant facts, bullets and resume templates
+## Next: step 7 — Switchboard agent tailoring and structured results
 
-Read step 6 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) before starting.
-Import explicitly selected local files into editable, versioned facts/bullets with
-provenance, add deterministic selection by tags and a template renderer producing PDF
-plus extracted text and structured source. Original imported files are never modified;
-editing a bullet/template must leave previous resumes and application records unchanged.
+Read step 7 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) before starting.
+The operator confirmed the shape: 1–3 base resumes with bullet slots, a first pass
+built by an **assembly persona** and then fully tailored by an **edit persona**, both
+saved separately. Jobs owns the agent runner and the persona/tool adapters; the host
+daemon never reads personas. Prompts and tool schemas/versions are snapshotted into
+SQLite at run time. Page text is untrusted input, never instructions.
 
-Step 5 deliberately did **not** run a live board smoke test, automate employer forms,
-add applicant facts/resumes or submit anything. Live discovery for the Greenhouse
-adapter remains an explicit smoke test; the scheduled-search worker and
-classification/filtering are step 8, and submission policy is steps 9–10.
+Still outstanding from earlier stages, deliberately: no live board smoke test, no
+employer form automation, **no PDF output** (deferred until a real need appears), no
+notifications, and no application submission. Scheduled search/classification is
+step 8; submission policy is steps 9–10.
 
 Future execution controls must remain visibly unavailable until callers exist. The
 current queue is a library, not a running worker: step 7 must inventory children before

@@ -423,10 +423,12 @@ The default/direct backend and Windows still terminate sessions during shutdown.
 
 The Linux-only jobs app is a separate package and service, disabled by default.
 It provides versioned settings, a dashboard, durable review decisions and evidence
-downloads, and posting import with archived text/screenshot evidence (manual text or
-browser capture through a configured, already-installed Chrome). Agent work,
-notifications and application submission are not implemented yet, and no live board
-crawl runs by default. Configure its origin in Switchboard Settings for an optional
+downloads, posting import with archived text/screenshot evidence (manual text or
+browser capture through a configured, already-installed Chrome), and a versioned
+career library that renders a structured text resume from your own bullets placed into
+base templates (PDF output is deferred). Agent/model tailoring, notifications and
+application submission are not implemented yet, and no live board crawl runs by
+default. Configure its origin in Switchboard Settings for an optional
 Jobs link. Enter the separate jobs token in the Jobs app itself. Root/core installation
 remains independent.
 See [packages/jobs/README.md](packages/jobs/README.md) for opt-in setup and

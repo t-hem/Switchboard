@@ -14,3 +14,8 @@ Step 5 adds posting import (URL capture plus manual text) and source management:
 enabled/disabled state, per-source Discover action and recent discovery runs. Capture
 controls are disabled with the service's stated reason when no browser is configured.
 Importing records evidence only; it never starts an agent or submits an application.
+
+Step 6 adds the career library and resume preview: JSON editors for the profile,
+bullet library and base template (saved as new immutable revisions), library
+export/import, and a render form that shows the rendered text, its visible omissions
+and each selected bullet's matched tags. PDF output is not implemented yet.

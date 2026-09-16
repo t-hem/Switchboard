@@ -1,16 +1,18 @@
 # TODO
 
 Implementation status (2026-09-16): Linux recovery steps 1a–1d are implemented,
-verified and deployed, including a real coding-agent self-restart. Jobs steps 2–5
-(isolated scaffold, persistence, dashboard/review UI, and posting import/capture with
-archived evidence) are complete and verified on Linux; step 6 (applicant facts, bullet
-library and resume templates) is next. See JOB-APPLICATION-PLAN.md for the staged log.
-Review-loop implementation has not started.
+verified and deployed, including a real coding-agent self-restart. Jobs steps 2–6 are
+complete and verified on Linux: isolated scaffold, persistence, dashboard/review UI,
+posting import/capture with archived evidence, and the versioned career library with
+bullet-based structured resume rendering (PDF deferred by operator decision). Step 7
+(persona-driven two-pass tailoring) is next. See JOB-APPLICATION-PLAN.md for the staged
+log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md and packages/jobs/DATABASE.md for current code/schema details.
 
 Stage work happens on branches (a second agent joined; master previously held all
-commits directly): `step4-jobs-dashboard` then `step5-posting-capture`. Do not work
-directly on master; merge a verified stage branch when it is reviewable.
+commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
+`step6-resume-library`, each stacked on the previous. Do not work directly on master;
+merge a verified stage branch when it is reviewable.
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 

@@ -22,6 +22,17 @@
 <label><input id="source-enabled" type="checkbox"> Enabled (discovery runs only when enabled)</label>
 <div class="actions"><button>Save source</button></div></form></details>
 <h2>Discovery runs</h2><div id="runs"></div>
+<h2>Career library</h2><p id="library-summary"></p>
+<label for="profile-editor">Profile facts JSON</label><textarea id="profile-editor" rows="8" spellcheck="false"></textarea>
+<div class="actions"><button id="save-profile">Save profile revision</button></div>
+<label for="bullets-editor">Bullet library JSON</label><textarea id="bullets-editor" rows="8" spellcheck="false"></textarea>
+<div class="actions"><button id="save-bullets">Save bullet revisions</button></div>
+<label for="template-editor">Base resume template JSON</label><textarea id="template-editor" rows="8" spellcheck="false"></textarea>
+<div class="actions"><button id="save-template">Save template revision</button><button id="export-library">Export library</button><label>Import library JSON <input id="import-library" type="file" accept="application/json"></label></div>
+<h2>Resume preview</h2>
+<form id="render-form"><label>Job snapshot <select id="render-snapshot"></select></label><label>Profile <select id="render-profile"></select></label><label>Template <select id="render-template"></select></label>
+<div class="actions"><button>Render resume</button><span>Structured text only; PDF output is not implemented yet.</span></div></form>
+<p id="render-note"></p><pre id="render-text"></pre><div id="render-bullets"></div>
 <h2>Needs your attention</h2><div id="attention"></div>
 <h2>Child agents</h2><div id="agents"></div><h2>Tasks</h2><div id="tasks"></div>
 <h2>Jobs</h2><div id="jobs"></div><h2>Applications</h2><div id="applications"></div>

@@ -3,6 +3,7 @@ let revision;
 let review;
 let adapters=[];
 let captureAvailable=false;
+let libraryState=null;
 let connectionEpoch=0;
 $('token').value=localStorage.getItem('jobs.token')??'';
 const message=text=>{$('message').textContent=text;};
@@ -22,7 +23,7 @@ async function load(){
   $('state').textContent=status.scheduler.reason;
   $('details').textContent=JSON.stringify({dataDirectory:status.dataDirectory,bootstrap:status.bootstrap,capabilities:status.capabilities},null,2);
   $('settings').hidden=false;localStorage.setItem('jobs.token',$('token').value);message('Settings loaded.');
-  await Promise.all([loadDashboard(),loadSources()]);
+  await Promise.all([loadDashboard(),loadSources(),loadLibrary()]);
  }catch(error){message(error.message);}
 }
 $('connect').addEventListener('submit',event=>{event.preventDefault();void load();});
@@ -57,7 +58,19 @@ async function loadDashboard(){
  list('applications',data.applications,r=>`${r.title} · ${r.company} · ${r.state}${r.block_reason?` · ${r.block_reason}`:''}`,r=>`/api/applications/${encodeURIComponent(r.id)}`);
  list('decisions',data.decisions,r=>`${r.decision} · ${r.subject_type} · ${r.reason??''}`,r=>r.attention_id?`/api/reviews/${encodeURIComponent(r.attention_id)}`:null);
  list('runs',data.searchRuns??[],r=>`${r.source_key} · ${r.adapter_id} · ${r.state}${r.error_json?` · ${JSON.parse(r.error_json).code??''}`:''}`,()=>null);
+ fillSelect('render-snapshot',(data.snapshots??[]).map(s=>({value:s.id,label:`${s.company} · ${s.title} · ${s.completeness}`})));
  $('dashboard').hidden=false;
+}
+function fillSelect(id,options){const select=$(id);const previous=select.value;select.replaceChildren(...options.map(option=>{const element=document.createElement('option');element.value=option.value;element.textContent=option.label;return element;}));if(options.some(option=>option.value===previous))select.value=previous;}
+async function loadLibrary(){
+ const data=await request('/api/library');libraryState=data;
+ const profile=data.profiles[data.profiles.length-1]??null;const template=data.templates[0]??null;
+ $('library-summary').textContent=`${data.profiles.length} profile(s), ${data.bullets.length} bullet(s), ${data.templates.length} template(s). Rendering produces structured text; PDF output is not implemented yet.`;
+ $('profile-editor').value=profile?JSON.stringify(profile.data,null,2):'';
+ $('bullets-editor').value=JSON.stringify(data.bullets.map(b=>({bulletId:b.bulletId,prose:b.prose,tags:b.tags,filters:b.filters,evidence:b.evidence})),null,2);
+ $('template-editor').value=template?JSON.stringify(template.data,null,2):'';
+ fillSelect('render-profile',data.profiles.map(p=>({value:p.id,label:`${p.profileId} rev ${p.revision}`})));
+ fillSelect('render-template',data.templates.map(t=>({value:t.id,label:`${t.templateId} rev ${t.revision}`})));
 }
 async function loadSources(){
  const data=await request('/api/sources');adapters=data.adapters;
@@ -126,6 +139,20 @@ $('source-form').onsubmit=async event=>{event.preventDefault();
   await request(`/api/sources/${encodeURIComponent(id)}`,{adapterId,sourceKey,config,enabled:$('source-enabled').checked});
   message('Source saved. Discovery runs only when enabled.');await loadSources();
  }catch(error){message(error.message);}};
-$('refresh-dashboard').onclick=()=>void Promise.all([loadDashboard(),loadSources()]).catch(error=>message(error.message));
+$('refresh-dashboard').onclick=()=>void Promise.all([loadDashboard(),loadSources(),loadLibrary()]).catch(error=>message(error.message));
+$('save-profile').onclick=async()=>{try{await request('/api/library/profile',{profileId:'primary',data:JSON.parse($('profile-editor').value)},'PUT');message('Profile revision saved.');await loadLibrary();}catch(error){message(error.message);}};
+$('save-bullets').onclick=async()=>{try{const profile=libraryState?.profiles?.at(-1);if(!profile)throw new Error('Save a profile before bullets.');await request('/api/library/bullets',{profileRevisionId:profile.id,bullets:JSON.parse($('bullets-editor').value)},'PUT');message('Bullet revisions saved.');await loadLibrary();}catch(error){message(error.message);}};
+$('save-template').onclick=async()=>{try{await request('/api/library/template',{templateId:'base',data:JSON.parse($('template-editor').value)},'PUT');message('Template revision saved.');await loadLibrary();}catch(error){message(error.message);}};
+$('export-library').onclick=async()=>{try{const data=await request('/api/library/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='career-library.json';link.click();URL.revokeObjectURL(url);}catch(error){message(error.message);}};
+$('import-library').onchange=async event=>{try{const file=event.target.files[0];if(!file)return;const result=await request('/api/library/import',{payload:JSON.parse(await file.text())},'POST');message(`Imported ${result.profiles} profile(s), ${result.bullets} bullet(s), ${result.templates} template(s) as new revisions.`);await loadLibrary();}catch(error){message(error.message);}};
+$('render-form').onsubmit=async event=>{event.preventDefault();
+ try{const body={jobSnapshotId:$('render-snapshot').value};if($('render-profile').value)body.profileRevisionId=$('render-profile').value;if($('render-template').value)body.templateRevisionId=$('render-template').value;
+  const result=await request('/api/resumes/render',body,'POST');
+  $('render-note').textContent=`Resume version ${result.resumeVersionId} (${result.created?'created':'reused'}). ${result.structured.missing.length?`Omissions: ${result.structured.missing.join('; ')}`:'No omissions.'}`;
+  $('render-text').textContent=result.text;
+  const root=$('render-bullets');root.replaceChildren();
+  for(const bullet of result.selectedBullets){const line=document.createElement('p');line.className='record-row';line.textContent=`${bullet.bulletId} · matched: ${bullet.matched.length?bullet.matched.join(', '):'no direct tag match'} · ${bullet.prose}`;root.append(line);}
+  message('Resume rendered.');
+ }catch(error){message(error.message);}};
 $('diagnostics').onclick=async()=>{try{$('diagnostics-data').textContent=JSON.stringify(await request('/api/diagnostics'),null,2);}catch(error){message(error.message);}};
 if($('token').value)void load();

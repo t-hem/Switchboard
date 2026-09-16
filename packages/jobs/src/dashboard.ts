@@ -8,13 +8,15 @@ import { SCHEMA_VERSION } from "./database.js";
 export function dashboardRoutes(app:FastifyInstance,store:SettingsStore,dir:string):void{
   const db=store.db,artifacts=new ArtifactStore(db,dir,{readOnly:true}),reviews=new Reviews(db);
   app.get("/api/dashboard",async()=>({schemaVersion:SCHEMA_VERSION,limit:100,
-    counts:Object.fromEntries(["jobs","applications","tasks","agent_runs","artifacts"].map(table=>[table,Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()!["n"])])),
+    counts:Object.fromEntries(["jobs","applications","tasks","agent_runs","artifacts","resume_versions"].map(table=>[table,Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()!["n"])])),
     attention:db.prepare("SELECT id,title,detail,state,version,settings_revision,task_id,run_id,artifact_hash,created_at FROM attention_items WHERE state='open' ORDER BY created_at LIMIT 100").all(),
     decisions:db.prepare("SELECT a.id AS attention_id,d.id,d.subject_type,d.subject_id,d.decision,d.reason,d.created_at FROM review_decisions d LEFT JOIN attention_items a ON a.decision_id=d.id ORDER BY d.created_at DESC LIMIT 100").all(),
     tasks:db.prepare("SELECT id,kind,state,attempt,max_attempts,updated_at FROM tasks ORDER BY updated_at DESC LIMIT 100").all(),
     agents:db.prepare("SELECT id,task_id,state,agent,model,spawner_provider,spawner_instance,spawner_session_id,created_at,finished_at FROM agent_runs ORDER BY created_at DESC LIMIT 100").all(),
     jobs:db.prepare("SELECT id,company,title,location,canonical_url,last_seen_at FROM jobs ORDER BY last_seen_at DESC LIMIT 100").all(),
     searchRuns:db.prepare("SELECT r.id,r.source_id,s.source_key,s.adapter_id,r.state,r.created_at,r.finished_at,r.error_json FROM search_runs r JOIN sources s ON s.id=r.source_id ORDER BY r.created_at DESC LIMIT 100").all(),
+    resumes:db.prepare("SELECT id,job_snapshot_id,profile_revision_id,template_revision_id,phase,text_artifact_hash,pdf_artifact_hash,created_at FROM resume_versions ORDER BY created_at DESC LIMIT 100").all(),
+    snapshots:db.prepare("SELECT s.id,s.job_id,s.purpose,s.completeness,s.captured_at,j.title,j.company FROM job_snapshots s JOIN jobs j ON j.id=s.job_id ORDER BY s.captured_at DESC LIMIT 100").all(),
     applications:db.prepare("SELECT a.id,a.job_id,a.state,a.block_reason,j.company,j.title,a.updated_at FROM applications a JOIN jobs j ON j.id=a.job_id ORDER BY a.updated_at DESC LIMIT 100").all()
   }));
   // Full verification is expensive; repeated HTTP requests share one snapshot.

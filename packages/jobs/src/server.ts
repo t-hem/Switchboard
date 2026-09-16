@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { dashboardRoutes } from "./dashboard.js";
 import { postingsRoutes, type PostingsDeps } from "./postings-api.js";
+import { libraryRoutes } from "./library-api.js";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
@@ -40,7 +41,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
   app.get("/api/status",async()=>({scheduler:scheduler.status(),dataDirectory:dir,
-    capabilities:{settings:true,import:true,discovery:true,capture:Boolean(config.browserExecutablePath),agents:false,applications:false},
+    capabilities:{settings:true,import:true,discovery:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:false},
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
@@ -50,6 +51,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   dashboardRoutes(app,store,dir);
   postingsRoutes(app,store,dir,config,options.deps);
+  libraryRoutes(app,store,dir);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{
       const file=new URL(name,uiDir);
