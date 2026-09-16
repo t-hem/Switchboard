@@ -1,7 +1,6 @@
 # Linux persistent sessions
 
-Implementation underway, 2026-09-16. The persistent backend is under acceptance test;
-production stays direct until step 1d migration is recorded. Windows stays unchanged.
+Deployed and verified on this Linux machine, 2026-09-16. Windows stays unchanged.
 
 ## Ownership decision
 
@@ -27,12 +26,11 @@ not automatically the browser's old scrollback. Do not promise byte replay or fu
 browser history reconstruction. Explicit historical display can be added separately.
 No terminal history is written to disk by the host/owner configuration.
 
-## Rollout gates (step 1d)
+## Remaining hardware checks
 
-- Production deployment and a real coding-agent self-restart demonstration.
-- Browser reconnect/takeover/resize; phone check when operator hardware is available.
-- Fault interruption during spawn/delete/recovery under actual upgrade conditions.
-- Verified offline CLI inventory/attachment/cleanup after a failed deployment.
+Physical phone and Windows hardware checks remain outstanding. The Linux rollout,
+real coding-agent self-restart, Chromium desktop/mobile viewport, crash-window and
+offline recovery checks passed; see the deployment record below.
 
 ## Backend/registry foundation (step 1b)
 
@@ -123,3 +121,29 @@ file with a new name before starting recovery from tmux metadata. Do not delete 
 gate files or lock directories blindly. If a lock is incomplete, verify its PID/start
 identity is no longer live before preserving/renaming it for manual recovery. A failed
 recovery does not justify abandoning a potentially running process.
+
+## This machine: deployed and verified (step 1d, 2026-09-16)
+
+The live daemon now uses tmux. Machine-local files are
+`~/.config/systemd/user/switchboard-owner.service`, `~/.switchboard/tmux-owner.conf`,
+`~/.switchboard/owner.sock` and the tmux block in `~/.switchboard/host.json`.
+`~/.switchboard/host.pre-tmux.json` is the private configuration backup. These files
+are deliberately not committed. The owner has no PartOf/BindsTo relationship with
+`switchboard.service`; its foreground ExecStart runs tmux independently. Each workload
+uses a separate transient scope. The owner is enabled at user-service startup.
+
+```sh
+systemctl --user status switchboard.service switchboard-owner.service
+systemctl --user restart switchboard.service  # retains persistent workloads
+node packages/host/dist/recovery-cli.js list
+```
+
+Never use owner restart as a normal deployment operation. If the socket is lost,
+use `systemctl --user kill --kill-who=main --signal=SIGUSR1 switchboard-owner.service`
+and restore its private permissions. The backend retries discovery when the owner
+returns, including when the primary registry was absent during host startup.
+
+The real coding-agent self-upgrade committed `6d38106`, restarted the live host and
+continued with unchanged agent PID/session ID. Chromium reconnect/takeover/resize,
+offline CLI attachment/cleanup, and crashes during spawn/deletion passed. Physical
+phone/Windows checks remain outstanding. `switchboard-web.timer` is active again.

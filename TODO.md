@@ -1,7 +1,7 @@
 # TODO
 
-Implementation status (2026-09-16): Linux recovery steps 1a–1c are implemented and
-verified in isolation; production migration/self-hosted acceptance (1d) is next.
+Implementation status (2026-09-16): Linux recovery steps 1a–1d are implemented,
+verified and deployed, including a real coding-agent self-restart. Step 2 is next.
 See JOB-APPLICATION-PLAN.md for the staged log. Jobs/review-loop work has not started.
 
 Ordered. #1 subsumes the model setting, so do it before #3.

@@ -167,6 +167,62 @@ wait
  await remove(ownerLoss.id);
  assert.equal(alive(survivorPid),false);
  console.log('PASS lost owner retains detached workload inventory and verified cleanup');
+ // Crash while durable spawn intent is present, before the start gate is released.
+ const pending=api('/sessions',{agent:'fixture',cwd:dir,label:'crash during spawn'}).catch(()=>null);
+ let intent;
+ for(let i=0;i<500;i++){
+  try{intent=JSON.parse(fs.readFileSync(registry,'utf8')).entries.find(e=>e.session.label==='crash during spawn'&&e.phase==='starting');}catch{}
+  if(intent)break;
+  await delay(2);
+ }
+ assert.ok(intent,'observed durable starting intent');
+ ctl('kill','--kill-who=main','--signal=SIGKILL',daemon);await pending;
+ await ctlAsync('restart',daemon);await ready();
+ const interruptedCrash=(await api('/sessions')).filter(s=>s.label==='crash during spawn');
+ assert.equal(interruptedCrash.length,1,'one recovered intent, never a duplicate launch');
+ await remove(interruptedCrash[0].id);
+ console.log('PASS SIGKILL during spawn retains one terminable recovery record');
+ // A daemon crash during deletion must not discard a surviving descendant scope.
+ fs.unlinkSync(childFile);
+ const deleting=await api('/sessions',{agent:'bash',cwd:dir,extraArgs:[script],label:'crash during delete'});
+ await until(()=>fs.existsSync(childFile),'delete-crash descendant');
+ const deletingPid=Number(fs.readFileSync(childFile,'utf8'));
+ await api(`/sessions/${deleting.id}`,null,'DELETE');
+ ctl('kill','--kill-who=main','--signal=SIGKILL',daemon);
+ await ctlAsync('restart',daemon);await ready();
+ assert.ok((await api('/sessions')).some(s=>s.id===deleting.id),'unfinished deletion retained');
+ await remove(deleting.id);assert.equal(alive(deletingPid),false);
+ console.log('PASS SIGKILL during deletion retains scope and permits confirmed retry');
+ // Owner reconnect can occur after startup with no primary registry available.
+ const late=await api('/sessions',{agent:'fixture',cwd:dir,label:'late inventory'});
+ await pause(daemon);fs.renameSync(registry,`${registry}.late-backup`);fs.unlinkSync(socket);
+ await ctlAsync('restart',daemon);await ready();assert.equal((await api('/sessions')).length,0);
+ ctl('kill','--kill-who=main','--signal=SIGUSR1',owner);
+ await until(()=>fs.existsSync(socket),'late owner socket');fs.chmodSync(socket,0o600);
+ await until(async()=> (await api('/sessions')).some(s=>s.id===late.id),'late alternate inventory');
+ assert.equal((await api(`/sessions/${late.id}`)).pid,late.pid);await remove(late.id);
+ console.log('PASS alternate inventory recovered when owner returns after host startup');
+ // Recovery CLI owns inventory offline, attaches through a real PTY and releases its lock.
+ const offline=await api('/sessions',{agent:'fixture',cwd:dir,label:'offline CLI'});
+ await pause(daemon);
+ const cli=path.resolve('packages/host/dist/recovery-cli.js');
+ const cliRun=(...args)=>execFileSync(process.execPath,[cli,...args],{env:{...process.env,SWITCHBOARD_DIR:dir},encoding:'utf8',timeout:12000});
+ assert.ok(cliRun('list').includes(offline.id));
+ const {spawn}=await import('node-pty');
+ const local=spawn(process.execPath,[cli,'attach',offline.id],{name:'xterm-256color',cols:100,rows:30,env:{...process.env,SWITCHBOARD_DIR:dir}});
+ let screen='';local.onData(data=>{screen+=data;});
+ const detached=new Promise(resolve=>local.onExit(resolve));
+ await until(()=>screen.includes('tick'),'offline interactive attachment');
+ local.kill('SIGTERM');await detached;
+ assert.equal(fs.existsSync(path.join(dir,'persistent-sessions.lock')),false);
+ assert.ok(fs.existsSync(`/proc/${offline.pid}`),'detach preserved workload');
+ assert.match(cliRun('terminate',offline.id),/Termination confirmed/);
+ await ctlAsync('restart',daemon);await ready();assert.equal((await api('/sessions')).length,0);
+ console.log('PASS offline CLI inventory, PTY attach/detach and confirmed termination');
+ if(process.argv.includes('--browser')){
+  const {browserRecovery}=await import('./browser-recovery.mjs');
+  await browserRecovery({config:cfg,api,restart:async()=>{await ctlAsync('restart',daemon);await ready();},until,remove,dir});
+ }
  console.log('ALL PASS');
 }catch(err){
  try{for(const entry of JSON.parse(fs.readFileSync(path.join(dir,'persistent-sessions.json'),'utf8')).entries){

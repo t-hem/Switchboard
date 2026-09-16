@@ -45,7 +45,6 @@ export class LinuxTmuxBackend implements SessionBackend {
     fs.mkdirSync(this.#gateDir, {recursive:true, mode:0o700});
     this.#registry = new RecoveryRegistry(dir, posixOps);
     for (const entry of this.#registry.list()) this.#entries.set(entry.session.id, entry);
-    this.#discover();
     this.#timer = setInterval(() => this.#poll(), 1000);
     this.#timer.unref();
   }
@@ -146,6 +145,9 @@ export class LinuxTmuxBackend implements SessionBackend {
   }
 
   recover(): { session: Session; handle: SessionHandle }[] {
+    // Retry alternate inventory when an owner becomes reachable after startup.
+    // The caller registers callbacks synchronously before reconciliation can emit exits.
+    this.#discover();
     return [...this.#entries.values()].map(entry => ({ session: entry.session, handle: this.#handle(entry) }));
   }
   #handle(entry: RecoveryEntry): TmuxHandle {
@@ -214,6 +216,13 @@ export class LinuxTmuxBackend implements SessionBackend {
       try {
         if (entry.ownerId !== this.#config.ownerId) throw new Error("Configured owner differs from recorded owner");
         const pane = panes.find(p => p.target === entry.target);
+        if (pane && entry.phase === "starting" && !entry.processIdentity) {
+          // A crash can occur after tmux creates the gated pane but before we save
+          // its PID. Recover the owned pane identity before checking its scope.
+          entry.session.pid = pane.pid;
+          entry.processIdentity = posixOps.processIdentity(pane.pid);
+          this.#persist(entry);
+        }
         const scope = this.#scope(entry);
         const handle = this.#handle(entry);
         if (!pane) {

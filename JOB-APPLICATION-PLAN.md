@@ -948,3 +948,27 @@ Approved to proceed; see implementation entries below.
   No production restart yet. The machine's automatic web rebuild timer was paused
   while editing UI and must be restored during verified rollout. User reference zip
   archives remain untracked and untouched. No jobs/review-loop implementation yet.
+
+### 2026-09-16 — step 1d Linux rollout complete
+
+- Step 1c committed/pushed as `e3477b0`. Installed machine-local independent
+  `switchboard-owner.service`, private owner configuration/socket, and enabled tmux
+  mode. Preflight found no live sessions or orphans. Private pre-migration host config
+  backup is retained outside the repository. The web rebuild timer is restored.
+- Actual Switchboard-created Claude session `VSnLPMnJ0jbytuNYAxZB3` (PID 468578)
+  corrected README, passed typecheck/direct regression, committed `6d38106`, built the
+  host, restarted the real daemon from inside its own session and continued afterward.
+  The outside harness independently observed changed daemon PID and unchanged agent
+  session ID/PID. The completed test session was explicitly removed and cleanup verified.
+- Added real Chromium acceptance for reconnect/redraw/input/resize, second-client
+  takeover/take-back and mobile viewport. Added offline CLI inventory, real PTY attach/
+  detach and confirmed termination; crashes during spawn and deletion; delayed owner
+  discovery after startup with missing registry. All passed in `restart.mjs --browser`.
+- These tests found two additional recovery gaps, fixed here: retry alternate inventory
+  when the owner returns after startup, and recover the gated pane PID before verifying
+  its scope after an interrupted spawn. Offline CLI signals now detach cleanly and
+  release ownership. Existing root typecheck and all 69 host unit tests pass.
+- Physical phone and real Windows hardware are still unverified; Chromium's mobile
+  viewport is not a physical phone test. Windows direct behavior is exercised by fakes
+  and the Linux direct regression. Hardware checks remain follow-ups, not a gate on
+  the independent jobs scaffold. No jobs or review-loop logic added to the daemon.

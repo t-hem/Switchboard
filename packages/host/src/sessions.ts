@@ -84,6 +84,9 @@ export class SessionManager {
   }
 
   list(): Session[] {
+    for (const { session, handle } of this.backend.recover?.() ?? []) {
+      if (!this.#sessions.has(session.id)) this.#register(session, handle);
+    }
     return [...this.#sessions.values()].map((r) => r.session);
   }
 

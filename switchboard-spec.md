@@ -14,8 +14,8 @@ terminate-on-restart. Jobs and the future review loop are separate same-reposito
 applications, accessed through optional UI links and generic HTTP contracts. They own
 their persistence and dependencies; the host never loads their business logic. This
 overrides older wording below requiring pipelines to live outside this repository.
-The opt-in backend is implemented and verified in isolated tests; production migration
-is tracked separately as step 1d. See LINUX-SESSIONS.md for configuration/recovery.
+The opt-in backend is implemented, tested and deployed on this Linux machine;
+step 1d records a successful real coding-agent self-restart. See LINUX-SESSIONS.md for configuration/recovery.
 Persistent streams contain tmux-rendered output; reconnect reconstructs the current
 screen, not the previous daemon's raw byte ring or full browser scrollback.
 

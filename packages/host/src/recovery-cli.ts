@@ -41,7 +41,14 @@ async function main(): Promise<void> {
       const owner = execFileSync("/usr/bin/tmux", ["-S", config.tmux.socketPath, "-N", "show-options", "-gqv", "@switchboard-owner"], {encoding:"utf8",timeout:5000}).trim();
       if (owner !== config.tmux.ownerId) throw new Error("Owner identity mismatch; refusing attachment");
       const child = spawn("/usr/bin/tmux", ["-S", config.tmux.socketPath, "-N", "attach-session", "-t", `sw-${config.tmux.ownerId}-${id}`], {stdio:"inherit"});
-      await once(child, "exit");
+      const detach = (): void => { child.kill("SIGTERM"); };
+      process.on("SIGTERM", detach);
+      process.on("SIGINT", detach);
+      try { await once(child, "exit"); }
+      finally {
+        process.off("SIGTERM", detach);
+        process.off("SIGINT", detach);
+      }
     }
   } finally { await sessions.shutdown(); }
 }

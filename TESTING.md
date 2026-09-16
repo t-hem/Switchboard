@@ -378,7 +378,7 @@ existing ProcessOps PID reuse tests. `DELETE` keeps its existing asynchronous 20
 contract: acceptance waits for disappearance from the inventory; 204 alone is not
 proof of termination. A failed cleanup remains visible with a recovery error.
 
-The HTTP backend is still direct until step 1d migration is explicitly recorded.
+The Linux HTTP backend was migrated to tmux in step 1d.
 Browser reconnect/takeover/resize with the persistent backend, a real coding-agent
 self-upgrade, phone use and real Windows hardware checks are not implied by these
 server tests. Windows remains on its original direct path.
@@ -388,3 +388,11 @@ from source every two minutes. Pause it while editing/testing UI changes to avoi
 publishing unfinished source; restore it after the verified UI build/rollout. It was
 paused during step 1c. A temporary `--outDir` permits web build checks without replacing
 the live served bundle.
+
+Step 1d verification: `node packages/host/acceptance/restart.mjs --browser` passed,
+including delayed owner inventory, SIGKILL during spawn/deletion, offline CLI with a
+real PTY, Chromium restart/resize/takeover and mobile viewport. Build web first for the
+browser option. Physical phone/Windows remain outstanding. The real coding-agent
+self-upgrade made commit `6d38106` and continued with unchanged agent ID/PID after the
+live daemon restarted. The temporary acceptance session was removed afterward.
+The previously paused web rebuild timer was restored during rollout.
