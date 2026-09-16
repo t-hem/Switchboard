@@ -179,6 +179,47 @@ export function useTerminal({
     fitRef.current = fit;
 
     /**
+     * Clipboard keys, and one key that must never reach the pty.
+     *
+     * xterm sends every Ctrl chord straight through as a control byte, which is
+     * correct for a terminal and wrong for the three chords that are muscle memory
+     * everywhere else. Returning false tells xterm not to handle the event, so
+     * nothing is written to the pty.
+     *
+     * Ctrl-C keeps both meanings, the way Windows Terminal and VS Code resolve it:
+     * with a selection it copies, without one it is still an interrupt. That split
+     * matters — interrupting an agent mid-turn is the single most used key here.
+     *
+     * Ctrl-Z is swallowed outright. A session runs the agent directly with no shell,
+     * so SIGTSTP suspends it with no job control anywhere to resume it — `fg` goes
+     * to a stopped process that is not reading. The session is simply lost, which is
+     * exactly what happened on 2026-09-15. There is no useful meaning to give it.
+     */
+    term.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
+      if (event.type !== "keydown") return true;
+      if (!event.ctrlKey && !event.metaKey) return true;
+      const key = event.key.toLowerCase();
+
+      if (key === "c" && term.hasSelection()) {
+        void navigator.clipboard?.writeText(term.getSelection()).catch(() => {
+          /* clipboard refused; the selection is still there to copy by hand */
+        });
+        event.preventDefault();
+        return false;
+      }
+      if (key === "a" && !event.shiftKey) {
+        term.selectAll();
+        event.preventDefault();
+        return false;
+      }
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        return false;
+      }
+      return true;
+    });
+
+    /**
      * Give touch scrolling back to the browser.
      *
      * xterm binds `touchstart`/`touchmove` to the `.xterm` root — an *ancestor* of
