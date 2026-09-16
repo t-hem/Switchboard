@@ -21,6 +21,8 @@ export function TerminalView({
   clientId,
   clientLabel,
   onBack,
+  sidebarCollapsed,
+  onExpandSidebar,
   onEvicted,
   onTakeOver,
 }: {
@@ -29,6 +31,8 @@ export function TerminalView({
   clientId: string;
   clientLabel: string;
   onBack: () => void;
+  sidebarCollapsed: boolean;
+  onExpandSidebar: () => void;
   onEvicted: (reason: string) => void;
   onTakeOver: () => void;
 }) {
@@ -45,6 +49,18 @@ export function TerminalView({
         >
           ‹ Back
         </button>
+        {/* Only while collapsed, and only at desktop width: below `md` the sidebar is
+            reached with ‹ Back above, which is the same journey by another name. */}
+        {sidebarCollapsed && (
+          <button
+            aria-label="Show sessions"
+            title="Show sessions"
+            onClick={onExpandSidebar}
+            className="hidden rounded px-1.5 py-0.5 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 md:block"
+          >
+            ☰
+          </button>
+        )}
         <span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{session.label}</span>
         <span className="hidden shrink-0 text-xs text-neutral-600 sm:inline">
           {entry.label} · {session.cols}×{session.rows}

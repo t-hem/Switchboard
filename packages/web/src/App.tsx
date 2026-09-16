@@ -7,7 +7,14 @@ import { OrphanBanner } from "./components/OrphanBanner.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { TerminalView } from "./components/TerminalView.tsx";
-import { clientId as loadClientId, clientLabel as loadClientLabel, loadHosts, saveHosts } from "./state/hosts.ts";
+import {
+  clientId as loadClientId,
+  clientLabel as loadClientLabel,
+  loadHosts,
+  saveHosts,
+  setSidebarCollapsed,
+  sidebarCollapsed as loadSidebarCollapsed,
+} from "./state/hosts.ts";
 import { useAgentConfigs } from "./state/useAgentConfigs.ts";
 import { useClaim } from "./state/useClaim.ts";
 import { useFleet } from "./state/useFleet.ts";
@@ -42,6 +49,7 @@ export function App() {
   }, []);
   const [newSessionFor, setNewSessionFor] = useState<string | null | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(loadSidebarCollapsed);
   const [reviewOpen, setReviewOpen] = useState(false);
 
   /** Re-claim every host, then remount the terminal so it reattaches and replays. */
@@ -152,10 +160,13 @@ export function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
+        {/* Collapsed hides the sidebar outright at desktop width; `☰` in the terminal
+            header brings it back. Below `md` this does nothing — there the sidebar and
+            the terminal already swap on whether a session is selected. */}
         <aside
           className={`flex w-full min-w-0 flex-col border-neutral-800 md:w-80 md:shrink-0 md:border-r ${
             selected ? "hidden md:flex" : "flex"
-          }`}
+          } ${collapsed ? "md:hidden" : ""}`}
         >
           <header className="flex items-center gap-2 px-4 py-3">
             <h1 className="flex-1 text-sm font-semibold tracking-tight">Switchboard</h1>
@@ -176,6 +187,17 @@ export function App() {
               }}
             >
               ⚙
+            </button>
+            <button
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className="hidden rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 md:block"
+              onClick={() => {
+                setCollapsed(true);
+                setSidebarCollapsed(true);
+              }}
+            >
+              ☰
             </button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -200,12 +222,36 @@ export function App() {
               clientId={clientId}
               clientLabel={clientLabel}
               onBack={() => setSelected(null)}
+              sidebarCollapsed={collapsed}
+              onExpandSidebar={() => {
+                setCollapsed(false);
+                setSidebarCollapsed(false);
+              }}
               onEvicted={(reason) => setEvicted({ hostId: selectedEntry.id, reason })}
               onTakeOver={() => void takeBack()}
             />
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
-              Select a session.
+            <div className="flex min-h-0 flex-1 flex-col">
+              {/* Collapsing with nothing selected would otherwise leave no control
+                  anywhere on screen to bring the list back. */}
+              {collapsed && (
+                <header className="hidden items-center border-b border-neutral-800 px-3 py-2 md:flex">
+                  <button
+                    aria-label="Show sessions"
+                    title="Show sessions"
+                    className="rounded px-1.5 py-0.5 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+                    onClick={() => {
+                      setCollapsed(false);
+                      setSidebarCollapsed(false);
+                    }}
+                  >
+                    ☰
+                  </button>
+                </header>
+              )}
+              <div className="flex flex-1 items-center justify-center text-sm text-neutral-600">
+                Select a session.
+              </div>
             </div>
           )}
         </main>

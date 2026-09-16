@@ -5,6 +5,7 @@ import type { HostEntry } from "../types.ts";
 const HOSTS_KEY = "switchboard.hosts";
 const CLIENT_ID_KEY = "switchboard.clientId";
 const CLIENT_LABEL_KEY = "switchboard.clientLabel";
+const SIDEBAR_KEY = "switchboard.sidebarCollapsed";
 
 /** localStorage throws in some privacy modes; never let that take the app down. */
 function read(key: string): string | null {
@@ -75,4 +76,20 @@ function defaultClientLabel(): string {
   if (/iPhone|Android.*Mobile/i.test(ua)) return "phone";
   if (/iPad|Tablet/i.test(ua)) return "tablet";
   return "desktop";
+}
+
+/**
+ * Whether the session sidebar is collapsed, on this device only.
+ *
+ * Persisted because it is a stated preference about how you want the window laid
+ * out, not a transient view state — springing back open on every reload would make
+ * the control worth less than the space it saves. Desktop-only: on a phone the
+ * sidebar and terminal already swap based on whether a session is selected.
+ */
+export function sidebarCollapsed(): boolean {
+  return read(SIDEBAR_KEY) === "1";
+}
+
+export function setSidebarCollapsed(collapsed: boolean): void {
+  write(SIDEBAR_KEY, collapsed ? "1" : "0");
 }
