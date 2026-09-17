@@ -17,9 +17,17 @@ export type SourceConfig = {
   boardId: string;
   region?: "global" | "eu";
   filters?: { keywords?: string[]; locations?: string[]; remote?: boolean | null };
-  requests?: { concurrency?: number; maxRetries?: number };
+  requests?: { concurrency?: number; maxRetries?: number; maxPostingsPerRun?: number };
+  schedule?: { intervalMinutes?: number };
   /** Only the deterministic fixture adapter reads this; real adapters ignore it. */
-  fixture?: { postings?: unknown[]; partial?: boolean };
+  fixture?: {
+    postings?: unknown[];
+    partial?: boolean;
+    /** Serve one page per call so checkpoint/resume can be exercised without a network. */
+    pagination?: { pageSize: number };
+    /** Fail the first N attempts with a retryable rate-limit error and a stated backoff. */
+    rateLimit?: { firstAttempts?: number; retryAfterMs?: number };
+  };
 };
 
 /** Provider-shaped data is preserved verbatim but never typed into workflow state. */
@@ -42,7 +50,12 @@ export type PostingInput = {
 export type DiscoverResult = {
   postings: PostingInput[];
   responses: RawResponse[];
-  /** False when pagination stopped early (rate limit, cap or error); a partial scan closes nothing. */
+  /**
+   * Opaque, adapter-defined resume point. Persisted in `search_runs.checkpoint_json`, so
+   * a partial scan resumes where it stopped. `null`/absent means the source is exhausted.
+   */
+  checkpoint?: unknown;
+  /** False when pagination stopped early (cap or rate limit); a partial scan closes nothing. */
   complete: boolean;
 };
 
@@ -52,6 +65,10 @@ export type SourceContext = {
   pageLimit?: number;
   /** At most this many postings are returned; a cap must be visible, never silent. */
   cap?: number;
+  /** Resume point from a previous partial scan (adapter-defined shape). */
+  checkpoint?: unknown;
+  /** Attempt number within the current bounded retry loop, so a fixture can stage a 429. */
+  attempt?: number;
 };
 
 export interface SourceAdapter {

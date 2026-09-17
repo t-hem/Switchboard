@@ -1,5 +1,6 @@
 import { htmlToText } from "../html.js";
 import { SourceError } from "../errors.js";
+import { retryAfterMs } from "../net.js";
 import type { DiscoverResult, PostingInput, RawResponse, SourceAdapter, SourceCapabilities, SourceConfig, SourceContext } from "./source.js";
 import { registerSourceAdapter } from "./source.js";
 
@@ -49,18 +50,26 @@ export class GreenhouseAdapter implements SourceAdapter {
     const url = `${BOARD_URL}/${encodeURIComponent(config.boardId)}/jobs?content=true`;
     const response = await context.http.get(url, { accept: "application/json" });
     const raw: RawResponse = { url: response.url, status: response.status, contentType: response.contentType, fetchedAt: response.fetchedAt, body: response.body };
+    if (response.status === 429) {
+      // Honour the server's own backoff instead of guessing one.
+      throw new SourceError("rate_limited", "Greenhouse rate limited the request", true, retryAfterMs(response.headers));
+    }
     if (response.status < 200 || response.status >= 300) {
-      const retryable = response.status === 429 || response.status >= 500;
-      throw new SourceError("source_http", `Greenhouse returned HTTP ${response.status}`, retryable);
+      throw new SourceError("source_http", `Greenhouse returned HTTP ${response.status}`, response.status >= 500);
     }
     let parsed: unknown;
     try { parsed = JSON.parse(response.body); }
     catch { throw new SourceError("malformed_response", "Greenhouse response was not JSON", false); }
     const jobs = record(parsed)["jobs"];
     if (!Array.isArray(jobs)) throw new SourceError("malformed_response", "Greenhouse response had no jobs array", false);
-    const postings = jobs.map(entry => normalizeGreenhouse(entry, config));
-    const cap = context.cap && context.cap > 0 ? context.cap : undefined;
-    return { postings: cap ? postings.slice(0, cap) : postings, responses: [raw], complete: !cap || postings.length <= cap };
+    const all = jobs.map(entry => normalizeGreenhouse(entry, config));
+    // The board API returns the whole board; a cap turns one response into ordered pages.
+    const checkpoint = record(context.checkpoint);
+    const offset = typeof checkpoint["offset"] === "number" && checkpoint["offset"] >= 0 ? Math.floor(checkpoint["offset"]) : 0;
+    const limit = context.cap && context.cap > 0 ? context.cap : all.length;
+    const postings = all.slice(offset, offset + limit);
+    const next = offset + postings.length;
+    return { postings, responses: [raw], checkpoint: next < all.length ? { offset: next } : null, complete: next >= all.length };
   }
 }
 

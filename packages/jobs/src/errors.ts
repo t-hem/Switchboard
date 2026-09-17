@@ -7,7 +7,8 @@ export class AppError extends Error {
 
 /** Adapter-boundary failure with an explicit retryability decision. Never silently retried. */
 export class SourceError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable: boolean) {
+  /** `retryAfterMs` carries a server-provided backoff (e.g. HTTP 429) without inventing one. */
+  constructor(readonly code: string, message: string, readonly retryable: boolean, readonly retryAfterMs?: number) {
     super(message);
   }
 }

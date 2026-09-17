@@ -34,12 +34,23 @@ export class FixtureAdapter implements SourceAdapter {
   readonly capabilities = fixtureCapabilities;
   normalize(entry: unknown, config: SourceConfig): PostingInput { return normalizeFixture(entry, config); }
   async discover(config: SourceConfig, context: SourceContext): Promise<DiscoverResult> {
+    const rateLimit = config.fixture?.rateLimit;
+    if (rateLimit && (context.attempt ?? 1) <= (rateLimit.firstAttempts ?? 1)) {
+      throw new SourceError("rate_limited", "Fixture rate limit", true, rateLimit.retryAfterMs ?? 1000);
+    }
     const entries = config.fixture?.postings ?? [];
     if (!Array.isArray(entries)) throw new SourceError("invalid_source", "Fixture postings must be an array", false);
     const raw: RawResponse = { url: `fixture://${config.boardId}`, status: 200, contentType: "application/json", fetchedAt: new Date().toISOString(), body: JSON.stringify({ jobs: entries }) };
-    const postings = entries.map(entry => normalizeFixture(entry, config));
-    const cap = context.cap && context.cap > 0 ? context.cap : undefined;
-    return { postings: cap ? postings.slice(0, cap) : postings, responses: [raw], complete: !(config.fixture?.partial ?? false) };
+    const all = entries.map(entry => normalizeFixture(entry, config));
+    const checkpoint = record(context.checkpoint);
+    const offset = typeof checkpoint["offset"] === "number" && checkpoint["offset"] >= 0 ? Math.floor(checkpoint["offset"]) : 0;
+    const pageSize = config.fixture?.pagination?.pageSize;
+    const cap = context.cap && context.cap > 0 ? context.cap : all.length;
+    const limit = Math.max(0, Math.min(pageSize ?? all.length, cap));
+    const postings = all.slice(offset, offset + limit);
+    const next = offset + postings.length;
+    const exhausted = next >= all.length;
+    return { postings, responses: [raw], checkpoint: exhausted ? null : { offset: next }, complete: exhausted && !(config.fixture?.partial ?? false) };
   }
 }
 

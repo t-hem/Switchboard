@@ -53,7 +53,9 @@ test("standalone settings are authenticated, versioned, durable and fail closed"
  assert.equal(saved.statusCode,200);assert.equal(saved.json().revision,2);
  assert.equal((await app.inject({method:"PUT",url:"/api/settings",headers,payload:{expectedRevision:1,value:initial.value}})).statusCode,409);
  const status=(await app.inject({url:"/api/status",headers})).json();
- assert.equal(status.scheduler.state,"unavailable");assert.equal(status.scheduler.dispatchAvailable,false);
+ // Enabling jobs makes discovery available; with no enabled source there is nothing due.
+ assert.equal(status.scheduler.state,"idle");assert.equal(status.scheduler.dispatchAvailable,true);
+ assert.deepEqual(status.scheduler.dueSources,[]);
  assert.equal(status.capabilities.agents,false);
  // Reopen with another connection: no host process or settings cache is required.
  const reopened=new SettingsStore(path.join(dir,"jobs.sqlite"));

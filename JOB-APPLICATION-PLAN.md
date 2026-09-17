@@ -1327,3 +1327,42 @@ Approved to proceed; see implementation entries below.
 - Not done here: a real-agent smoke (needs the tool bridge, PERSONAS.md), the live-host
   restart confirmation (run when convenient: `git checkout <7c>`, build, restart only
   `switchboard.service`), and the step-8 worker that will drive tailoring on a schedule.
+
+### 2026-09-16 — step 8a complete (discovery scheduling, pagination and backoff)
+
+- Branch `step8-search-filtering` from `step7c-spawner-recovery` (which carries the merged
+  master display fixes). This checkpoint covers scheduling/pagination/backoff; scored
+  filtering, screening decisions and UI inspect/skip/requeue follow in 8b.
+- Adapters grew an opaque, adapter-defined `checkpoint`: `DiscoveryResult.checkpoint` is
+  persisted in `search_runs.checkpoint_json`, and `SourceContext.checkpoint`/`attempt`
+  let a source resume mid-scan. Greenhouse turns a capped board response into ordered
+  pages by offset; the fixture adapter gained `pagination.pageSize` and a
+  `rateLimit.firstAttempts` fault. `SourceError` carries an optional `retryAfterMs`, and
+  `withRetries` honours a server `Retry-After` (capped at 30s) instead of inventing a
+  delay.
+- `Discovery.run` loops pages: it archives each response, ingests what it sees, **persists
+  the checkpoint after every page**, and marks a run `completed` only when the source is
+  exhausted. A cap or rate limit leaves the run `blocked` with its resume point, so a
+  later run continues where it stopped. `MAX_PAGES_PER_RUN` bounds a runaway adapter.
+- `scheduler.ts` replaces the disabled shell with a real `DiscoveryScheduler` plus a pure
+  `schedulerStatus`. Due is derived from stored run times and per-source
+  `schedule.intervalMinutes` (default 360), so a **restart never stampedes**. A cycle runs
+  due sources one at a time under the shared `scheduler_lock` lease (added
+  `TaskQueue.releaseScheduler`), renews it between sources, bounds a cycle to
+  `MAX_SOURCES_PER_RUN`, uses `requests.maxPostingsPerRun` as the cap, and records one
+  source's failure without stalling the rest. Enable/pause is re-read every cycle.
+  `runOnce({force:true})` is the operator "run now" action.
+- `scheduler-api.ts` exposes read-only `GET /api/scheduler` (status + recent runs) and
+  `POST /api/scheduler/run` (`{force?}`; refuses to overlap the background worker). The
+  worker starts in `index.ts` and stops on SIGTERM. `/api/status` now reports real
+  scheduling state.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 77 jobs tests (10 new across
+  discovery pagination/checkpoint/resume/dedup/rate-limit/partial/disabled and scheduler
+  due/pause/restart/cap/lock/bounded-cycle/fault-isolation); root typecheck. New
+  `packages/jobs/acceptance/scheduling.mjs` passed against the real service (due, paginate
+  → checkpoint → resume, cap, repeat dedup, rate-limit retry, pause, disabled source, UTC
+  run times, restart without stampede). `scaffold`, `personas`, `library` and `capture`
+  acceptances still pass, including the scaffold's "no external work while disabled"
+  check with the worker running.
+- Not in 8a: scored filtering, unknown-vs-mismatch, salary normalization, screening
+  decisions and inspect/skip/requeue (8b); notifications deliberately deferred.

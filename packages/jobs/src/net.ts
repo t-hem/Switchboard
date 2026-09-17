@@ -108,7 +108,12 @@ export class FetchHttpClient implements HttpClient {
   }
 }
 
-/** Retry only explicitly retryable failures, with bounded attempts and linear backoff. */
+/**
+ * Retry only explicitly retryable failures, with bounded attempts. A server-provided
+ * `retryAfterMs` (HTTP 429 `Retry-After`) is honoured, capped so a hostile header cannot
+ * park a worker for hours.
+ */
+export const MAX_RETRY_AFTER_MS = 30_000;
 export async function withRetries<T>(maxRetries: number, action: (attempt: number) => Promise<T>, sleepMs = 400): Promise<T> {
   const attempts = Math.max(0, Math.min(maxRetries, 5)) + 1;
   let last: unknown;
@@ -117,8 +122,20 @@ export async function withRetries<T>(maxRetries: number, action: (attempt: numbe
     catch (error) {
       last = error;
       if (!(error instanceof SourceError) || !error.retryable || attempt === attempts) throw error;
-      await new Promise(resolve => setTimeout(resolve, sleepMs * attempt));
+      const delay = error.retryAfterMs === undefined
+        ? sleepMs * attempt
+        : Math.min(Math.max(0, error.retryAfterMs), MAX_RETRY_AFTER_MS);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
   throw last;
+}
+
+/** Parse an HTTP `Retry-After` header (seconds or a date) into milliseconds. */
+export function retryAfterMs(headers: Record<string, string>, now = Date.now()): number | undefined {
+  const value = headers["retry-after"];
+  if (!value) return undefined;
+  if (/^\d+$/.test(value.trim())) return Number(value.trim()) * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : undefined;
 }

@@ -10,7 +10,8 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
 import { AppError, SourceError } from "./errors.js";
-import { SchedulerShell } from "./scheduler.js";
+import { schedulerStatus } from "./scheduler.js";
+import { schedulerRoutes } from "./scheduler-api.js";
 import { settingsUpdateSchema, type Settings } from "./settings.js";
 import type { SettingsStore } from "./store.js";
 
@@ -18,7 +19,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   options:{uiDir?:URL; deps?:PostingsDeps} = {}) {
   const uiDir = options.uiDir ?? new URL("../../jobs-ui/dist/", import.meta.url);
   const app = Fastify({logger:false,bodyLimit:256*1024,ajv:{customOptions:{coerceTypes:false,removeAdditional:false,useDefaults:false}}});
-  const scheduler = new SchedulerShell(store);
+
   app.addHook("onRequest",async(req,reply)=>{
     reply.header("Cache-Control","no-store");
     reply.header("X-Content-Type-Options","nosniff");
@@ -44,7 +45,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     return reply.code(status).send({error:{code:status===500?"internal_error":"invalid_request",message:status===500?"Operation failed; previous committed data is retained":"Invalid request",fields:[]}});
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
-  app.get("/api/status",async()=>({scheduler:scheduler.status(),dataDirectory:dir,
+  app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
     capabilities:{settings:true,import:true,discovery:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:false},
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
@@ -63,6 +64,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   postingsRoutes(app,store,dir,config,options.deps);
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
+  schedulerRoutes(app,store,dir,config);
   runnerRoutes(app,store,dir,config);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{

@@ -53,6 +53,11 @@ export class TaskQueue {
   #scheduler(lease:{owner:string;generation:number},now:number):void{
     if(!this.db.prepare("SELECT 1 FROM scheduler_lock WHERE name='main' AND owner=? AND generation=? AND lease_expires_at>?").get(lease.owner,lease.generation,now))throw new AppError("stale_scheduler","Scheduler ownership expired or changed",409);
   }
+  /** Release ownership explicitly so the next tick does not wait for the lease to expire. */
+  releaseScheduler(lease:SchedulerLease,now=Date.now()):void{
+    void now;
+    transaction(this.db,()=>{this.db.prepare("DELETE FROM scheduler_lock WHERE name='main' AND owner=? AND generation=?").run(lease.owner,lease.generation);});
+  }
   renewScheduler(lease:SchedulerLease,duration=30000,now=Date.now()):SchedulerLease{
     ttl(duration);return transaction(this.db,()=>{this.#scheduler(lease,now);this.db.prepare("UPDATE scheduler_lock SET lease_expires_at=? WHERE name='main'").run(now+duration);return {...lease,expiresAt:now+duration};});
   }
