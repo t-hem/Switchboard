@@ -25,6 +25,19 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/* TerminalScrollbar supplies the visible drag handle on every device. Hide only
+   the native scrollbar chrome; the viewport must remain scrollable for wheel,
+   touch momentum, and the custom handle's scrollTop updates. */
+.xterm .xterm-viewport {
+  scrollbar-width: none;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* --- Terminal scrolling on a touch screen ---------------------------------
    xterm replaces the browser's own touch scrolling with a 1:1 drag: it binds
    `touchmove` to the `.xterm` root with `{passive: false}` and preventDefault()s

@@ -38,7 +38,7 @@ export type ServerDeps = {
 };
 
 type IdParams = { id: string };
-type StreamQuery = { token?: string; clientId?: string; clientLabel?: string };
+type StreamQuery = { token?: string; clientId?: string; clientLabel?: string; display?: string };
 type ClaimBody = { clientId?: unknown; clientLabel?: unknown };
 
 type CreateSessionBody = {
@@ -159,10 +159,62 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
 
       let dropping = false;
       let detach: (() => void) | null = null;
+      let snapshotMode = false;
+      let snapshotTimer: NodeJS.Timeout | undefined;
+      let capturing = false;
+      let dirty = false;
+      let previousSnapshot = "";
+      let previousHistory: string | undefined;
+      let disposed = false;
+      let pendingExit: number | null | undefined;
+      let interactiveUntil = 0;
+      const scheduleSnapshot = (): void => {
+        dirty = true;
+        if (disposed || capturing || snapshotTimer) return;
+        snapshotTimer = setTimeout(() => {
+          snapshotTimer = undefined;
+          void sendSnapshot();
+        }, Date.now() < interactiveUntil ? 0 : 100);
+      };
+      const sendSnapshot = async (): Promise<void> => {
+        if (disposed || socket.readyState !== socket.OPEN) return;
+        if (socket.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) {
+          scheduleSnapshot();
+          return;
+        }
+        capturing = true;
+        dirty = false;
+        try {
+          const frame = await deps.sessions.snapshot(id);
+          if (disposed || socket.readyState !== socket.OPEN) return;
+          const data = JSON.stringify(frame);
+          if (data !== previousSnapshot) {
+            // Most token updates only change the screen. Do not resend thousands
+            // of identical history lines on every keystroke or cursor update.
+            socket.send(frame && frame.history === previousHistory
+              ? JSON.stringify({ ...frame, history: undefined }) : data);
+            previousHistory = frame?.history;
+            previousSnapshot = data;
+          }
+          if (pendingExit !== undefined) {
+            socket.send(JSON.stringify({ type: "exit", exitCode: pendingExit }));
+            pendingExit = undefined;
+          }
+        } catch {
+          // Never silently strand the browser on stale output. Reconnect retries
+          // capture and the access probe distinguishes a deleted session.
+          if (!disposed) socket.close(1011, "terminal capture unavailable");
+        } finally {
+          capturing = false;
+          if (dirty && !disposed) scheduleSnapshot();
+        }
+      };
       try {
+        snapshotMode = req.query.display === "snapshot" && deps.sessions.supportsSnapshots(id);
         detach = deps.sessions.attach(id, {
           onData: (chunk) => {
             if (socket.readyState !== socket.OPEN) return;
+            if (snapshotMode) { scheduleSnapshot(); return; }
             if (socket.bufferedAmount > MAX_SOCKET_BACKLOG_BYTES) {
               if (!dropping) {
                 dropping = true;
@@ -179,9 +231,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           },
           onExit: (exitCode) => {
             if (socket.readyState !== socket.OPEN) return;
+            if (snapshotMode) { pendingExit = exitCode; scheduleSnapshot(); return; }
             socket.send(JSON.stringify({ type: "exit", exitCode }));
           },
         });
+        if (snapshotMode) scheduleSnapshot();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "attach failed";
         socket.send(JSON.stringify({ type: "error", message }));
@@ -203,11 +257,22 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         const m = msg as Record<string, unknown>;
         try {
           if (m["type"] === "input" && typeof m["data"] === "string") {
+            // Echo and cursor movement should not wait behind the bulk-output
+            // batching timer. Keep this lane open for delayed application redraws.
+            interactiveUntil = Date.now() + 500;
+            if (snapshotMode && snapshotTimer) {
+              clearTimeout(snapshotTimer);
+              snapshotTimer = undefined;
+              scheduleSnapshot();
+            }
             deps.sessions.write(id, m["data"]);
           } else if (m["type"] === "resize") {
             const cols = asNumber(m["cols"]);
             const rows = asNumber(m["rows"]);
-            if (cols !== undefined && rows !== undefined) deps.sessions.resize(id, cols, rows);
+            if (cols !== undefined && rows !== undefined) {
+              deps.sessions.resize(id, cols, rows);
+              if (snapshotMode) scheduleSnapshot();
+            }
           }
         } catch (err: unknown) {
           // The session may have been killed between frames.
@@ -216,6 +281,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       });
 
       const cleanup = (): void => {
+        disposed = true;
+        if (snapshotTimer) clearTimeout(snapshotTimer);
         detach?.();
         detach = null;
         deps.claims.unregister(clientId, evictable);

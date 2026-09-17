@@ -1,5 +1,20 @@
 # What still needs testing
 
+## Terminal history and responsive display regression
+
+With Node 22 selected, run `npm run accept:display -w @switchboard/web` on Linux.
+This starts a disposable tmux server, test host and Vite server, then drives the real
+TerminalView in Chromium. No live configuration, claims or sessions are used.
+It checks retained history and the scrollbar, wheel/touch/drag scrolling, stable
+reading during streamed output and Pi-style history rebuilds, Latest, keyboard
+input, and desktop-to-phone reconnect with old long lines wrapping visibly. It also
+measures key-to-visible-echo latency, checks arrow keys and rapid typing, and rejects
+a local median latency of 90 ms or more (the original batching delay was 100 ms).
+The host unit suite also checks cursor/color fidelity and split bracketed-paste
+mode sequences. Physical phone/Safari behavior remains a hardware check.
+
+## Existing suites
+
 Use `nvm use` (or `nvm install` first) to select the pinned Node 22.23.2.
 `npm test` runs the cross-platform host suite. On Linux, run `npm run jobs:setup`
 once, then `npm run test:all` to cover both host and jobs. `npm run jobs:test`

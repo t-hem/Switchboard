@@ -116,7 +116,7 @@ export function streamUrl(
   clientLabel: string,
 ): string {
   const base = normaliseBaseUrl(entry.baseUrl).replace(/^http/i, "ws");
-  const query = new URLSearchParams({ token: entry.token, clientId, clientLabel });
+  const query = new URLSearchParams({ token: entry.token, clientId, clientLabel, display: "snapshot" });
   return `${base}/sessions/${sessionId}/stream?${query.toString()}`;
 }
 

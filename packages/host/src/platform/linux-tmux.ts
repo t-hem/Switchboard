@@ -8,6 +8,7 @@ import { RecoveryRegistry, isRecoveryEntry, type RecoveryEntry } from "../backen
 import { posixOps } from "./posix.js";
 import { ptyChunkToBytes } from "../ptybytes.js";
 import { TmuxQueryFilter } from "./tmux-queries.js";
+import { captureTerminal, TmuxInputModes } from "./tmux-display.js";
 
 type Pane = { target: string; pid: number; dead: boolean; exitCode: number | null; metadata: string };
 const command = (file: string, args: string[]): string => {
@@ -301,6 +302,7 @@ export class LinuxTmuxBackend implements SessionBackend {
 }
 
 class TmuxHandle implements SessionHandle {
+  #inputModes = new TmuxInputModes();
   #child: pty.IPty | null = null;
   #data = new Set<(data: Buffer) => void>();
   #exit = new Set<(code: number | null) => void>();
@@ -320,6 +322,7 @@ class TmuxHandle implements SessionHandle {
     const queries = new TmuxQueryFilter();
     child.onData(raw => {
       const bytes = queries.push(ptyChunkToBytes(raw as unknown as string | Buffer));
+      this.#inputModes.feed(bytes);
       if (bytes.length === 0) return;
       for (const cb of this.#data) cb(bytes);
     });
@@ -336,6 +339,11 @@ class TmuxHandle implements SessionHandle {
     this.#child.write(data);
   }
   resize(cols: number, rows: number): void { this.#child?.resize(cols, rows); }
+  async snapshot() {
+    const frame = await captureTerminal(this.socket, this.entry.target);
+    frame.bracketedPaste = this.#inputModes.bracketedPaste;
+    return frame;
+  }
   detach(): void { const child = this.#child; this.#child = null; child?.kill("SIGTERM"); }
   disconnect(): void { this.detach(); this.#data.clear(); this.#exit.clear(); }
 }

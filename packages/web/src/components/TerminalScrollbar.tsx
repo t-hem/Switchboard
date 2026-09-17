@@ -59,7 +59,7 @@ export function TerminalScrollbar({ viewport }: { viewport: HTMLElement | null }
   // Nothing to scroll: a full-height thumb would only be in the way.
   if (maxScroll <= 1) return null;
 
-  const thumbHeight = Math.max(MIN_THUMB_PX, clientHeight * (clientHeight / scrollHeight));
+  const thumbHeight = Math.min(clientHeight, Math.max(MIN_THUMB_PX, clientHeight * (clientHeight / scrollHeight)));
   const maxThumbTop = clientHeight - thumbHeight;
   const thumbTop = (top / maxScroll) * maxThumbTop;
 

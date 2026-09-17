@@ -7,6 +7,19 @@ See IMPLEMENTATION-HANDOFF.md and packages/jobs/DATABASE.md for current code/sch
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 
+## Low-priority display defects
+
+- **Desktop resize/zoom reformatting delay (2026-09-16):** Desktop formatting
+  settles correctly, but initially looks narrow/mobile-like and visibly lags after
+  resizing or desktop browser zoom. User clarified that the resize delay is not
+  present on the phone. Potential contributors in the shared display path: the
+  client's 150 ms resize debounce, up to 100 ms of host snapshot batching, and the
+  application's resize/redraw plus capture/render time; these do not yet explain
+  the desktop/phone difference. Initial attachment also waits for a capture matching
+  the new geometry. User prefers preserving working
+  typing, scrolling, and wrapping over aggressive timing changes. Revisit with
+  measured resize-to-paint latency and regression checks before optimizing.
+
 ---
 
 ## Architectural rule that governs all of this

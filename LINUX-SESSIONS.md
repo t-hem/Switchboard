@@ -18,12 +18,32 @@ Exact argv uses multiple command arguments, not shell concatenation. Per-session
 
 ## Display contract
 
+The web client requests `display=snapshot` on its session WebSocket. Persistent
+sessions send the pane's retained history and current screen from `capture-pane`,
+with actual geometry, cursor position and keyboard modes. History joins soft wraps
+and the browser reflows it at its current width; screen rows retain their geometry.
+Captures made before a resize reaches the pane are not painted at the new width.
+An unchanged history is omitted from subsequent frames on that connection.
+Keyboard input bypasses the 100 ms bulk-output batching delay for subsequent
+redraws. The browser repaints only the screen when history is unchanged, and only
+updates cursor/modes when the screen text is unchanged.
+
+Browser scrolling stays local and freezes the displayed snapshot while reading.
+Incoming snapshots are coalesced until the reader scrolls to the bottom or selects
+Latest. This keeps Pi-style history rebuilds from moving the text under the reader.
+The pane's bounded tmux history is available after daemon restart too; already
+discarded history cannot be recovered. Applications using their own alternate
+screen still retain their usual alternate-screen semantics.
+
+Raw WebSocket consumers and direct PTYs keep the byte-stream protocol below.
+
 Normal direct PTYs retain their existing raw-byte behavior. tmux attachments stream
 rendered terminal output, with Unicode/input/resize/alternate-screen fidelity checked
 by the spike. After restart the old daemon byte ring is gone. The new attachment
 redraws the current screen; tmux keeps bounded history in memory, but that history is
-not automatically the browser's old scrollback. Do not promise byte replay or full
-browser history reconstruction. Explicit historical display can be added separately.
+not automatically a raw client's old scrollback. Do not promise original byte replay
+or history beyond what the pane retains. The web snapshot protocol above explicitly
+retrieves that retained history.
 No terminal history is written to disk by the host/owner configuration.
 
 An attachment's terminal is the host pty, so tmux's attach-time queries (`ESC[>c`,
