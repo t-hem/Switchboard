@@ -132,6 +132,12 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   `applications.ts`/`applications-api.ts` (manifest-hash approval, automatic invalidation
   of a stale approval, review package with `changesSinceReview`, handoff resolution,
   manual-completion receipts). `acceptance/forms.mjs` covers it with real Chromium.
+- **Step 9c** (verified, on branch `step9-application-prep`): the `jobs-ui` review screen
+  (preparation form plus package view: posting text/screenshot/source link, selected resume
+  with agent run, answer set, filled fields and uploads, changes since review, approval,
+  handoff resolution, manual completion). `acceptance/review.mjs` drives the routes over
+  HTTP and checks the served screen in a real browser; it caught two defects (an unpopulated
+  application list and adapter options missing from the idempotency key).
 - **Step 8** (verified, on branch `step8-search-filtering`): discovery scheduling with
   paginated checkpoints (resume after a cap or rate limit), `Retry-After`-aware backoff,
   a restart-safe interval scheduler with a shared lease and bounded cycles, schema-4
@@ -216,19 +222,24 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 9c — the review screen in jobs-ui
+## Next: step 10 — controlled submission and duplicate prevention
 
-Step 9b is complete and verified (branch `step9-application-prep`, commits `4fa4d26`,
-`d14a8f3`, `2a4a7a9`, `2e6cea7`): the supervised browser with verifiable crash cleanup,
-the `FormSession` seam and browser-backed `fixture-form` adapter, preparation routes,
-manifest-hash approvals with automatic invalidation, handoff resolution and
-operator-reported manual receipts, plus `acceptance/forms.mjs` passing against a real
-Chromium and a loopback fixture form site (exact fields and exact resume sha256, zero
-submissions). What remains for step 9 is the `jobs-ui` review screen: posting text and
-screenshot, the selected resume, the answer set, what changed since the last review,
-approve, resolve a handoff, and report a manual completion. Nothing in step 9 submits.
+Step 9 is **complete and verified** on branch `step9-application-prep`: the supervised
+browser with verifiable crash cleanup, real form filling and upload against a fixture site
+(`acceptance/forms.mjs`), preparation/package/resolve/manual-completion/approve routes,
+manifest-hash approvals that are automatically invalidated by changed evidence or answers,
+and the `jobs-ui` review screen (`acceptance/review.mjs`, including a real-browser check of
+the served screen). Nothing in step 9 submits an application — there is deliberately no
+submission route yet.
 
-Steps 9b–9c in one place:
+Step 10 must add the send path behind evidence/review/site policy: serialise competing
+attempts per job, recheck enabled/pause, review hash or automatic policy, caps and complete
+artifacts immediately before sending, record receipts and confirmation evidence, support
+truthful manual reconciliation of unknown outcomes, and prove at most one fixture
+submission without explicit reconciliation. The fixture form site already has a `/submit`
+endpoint that the acceptance counts, so the fixture is ready for it.
+
+Step 9 in one place:
 
 The 9a core exists: `ApplicationAdapter` (registry + `manual`/`fixture`),
 `PreparationService` evidence preflight, blocking rules, immutable draft attempt manifest

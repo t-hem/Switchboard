@@ -1439,6 +1439,31 @@ Approved to proceed; see implementation entries below.
   form server acceptance, and manual-completion receipts. Those are 9b. Nothing in 9a
   transmits or submits anything.
 
+### 2026-09-16 — step 9 complete
+
+Step 9c adds the review screen in `jobs-ui`: a preparation form (application, adapter,
+form URL, answers JSON) and a package view showing the posting text with its source link
+and full-page screenshot, the selected resume with its agent run, the prepared answer set,
+the filled fields and uploads, what changed since the last review, and the approval state.
+From there the operator approves one exact manifest, resolves a handoff with merged
+answers, or records a manual completion with the receipt they were shown. The applications
+list opens the package instead of raw JSON.
+
+`acceptance/review.mjs` drives the routes over HTTP on a disposable service (prepare,
+package, wrong-hash approval refused, approval, changed answers cancelling that approval
+with the reason, CAPTCHA handoff with URL/answers/resume, resolution continuing the same
+application, operator-reported completion rejecting a duplicate report, and the absence of
+any submission route) and, when a browser is configured, loads the served screen and
+asserts it connects, lists the application, offers the adapters and runs without a script
+error. That browser check immediately found two real defects: the prepare form never
+populated its application list, and adapter options were missing from the preparation
+idempotency key (so a retry with different adapter behaviour reused a stale attempt). Both
+are fixed, and the handoff context now records its own code.
+
+Verified: jobs typecheck, 101 jobs tests, and `scaffold`, `scheduling`, `review`, `forms`,
+`personas`, `library` and `capture` acceptances all pass. Step 9 is complete; nothing in it
+submits an application.
+
 ### 2026-09-16 — step 9b complete except the review screen
 
 - Branch `step9-application-prep`. `browser.ts` supervises exactly one Chromium with a

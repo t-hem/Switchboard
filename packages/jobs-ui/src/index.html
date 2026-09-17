@@ -37,6 +37,14 @@
 <h2>Needs your attention</h2><div id="attention"></div>
 <h2>Child agents</h2><div id="agents"></div><h2>Tasks</h2><div id="tasks"></div>
 <h2>Jobs</h2><div id="jobs"></div><h2>Applications</h2><div id="applications"></div>
+<h2>Application preparation</h2>
+<p>Preparation fills the employer's own form with the saved resume and your answers, uploads the exact resume file, and stops. Nothing is submitted here. Approving records your decision against the exact prepared manifest; preparing different evidence or answers cancels that approval.</p>
+<form id="prepare-form"><label>Application <select id="prepare-application"></select></label>
+<label>Form adapter <select id="prepare-adapter"></select></label>
+<label>Application form URL <input id="prepare-url" type="url" maxlength="2048" placeholder="https://boards.example.com/company/apply/123"></label>
+<label for="prepare-answers">Answers JSON</label><textarea id="prepare-answers" rows="6" spellcheck="false" placeholder='{"name":"Ada Lovelace","email":"ada@example.com"}'></textarea>
+<div class="actions"><button id="prepare-submit">Prepare application</button><span id="prepare-note"></span></div></form>
+<div id="package"></div>
 <h2>Recent decisions</h2><div id="decisions"></div>
 <section id="record" hidden tabindex="-1"><h2 id="record-title"></h2><div id="record-links" class="actions"></div><pre id="record-data"></pre>
 <form id="decision" hidden><label>Reason or requested changes<textarea id="reason" rows="3" maxlength="10000"></textarea></label>

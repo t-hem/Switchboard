@@ -23,7 +23,7 @@ async function load(){
   $('state').textContent=status.scheduler.reason;
   $('details').textContent=JSON.stringify({dataDirectory:status.dataDirectory,bootstrap:status.bootstrap,capabilities:status.capabilities},null,2);
   $('settings').hidden=false;localStorage.setItem('jobs.token',$('token').value);message('Settings loaded.');
-  await Promise.all([loadDashboard(),loadSources(),loadLibrary()]);
+  await Promise.all([loadDashboard(),loadSources(),loadLibrary(),loadApplications()]);
  }catch(error){message(error.message);}
 }
 $('connect').addEventListener('submit',event=>{event.preventDefault();void load();});
@@ -55,7 +55,9 @@ async function loadDashboard(){
  list('agents',data.agents,r=>`${r.agent} · ${r.state} · task ${r.task_id} · ${r.model}`,r=>`/api/agents/${encodeURIComponent(r.id)}`);
  list('tasks',data.tasks,r=>`${r.kind} · ${r.state} · attempt ${r.attempt}/${r.max_attempts}`,r=>`/api/tasks/${encodeURIComponent(r.id)}`);
  list('jobs',data.jobs,r=>`${r.title} · ${r.company}`,r=>`/api/jobs/${encodeURIComponent(r.id)}`);
- list('applications',data.applications,r=>`${r.title} · ${r.company} · ${r.state}${r.block_reason?` · ${r.block_reason}`:''}`,r=>`/api/applications/${encodeURIComponent(r.id)}`);
+ list('applications',data.applications,r=>r.title,r=>null);
+ applicationsList(data.applications??[]);
+ fillSelect('prepare-application',(data.applications??[]).map(a=>({value:a.id,label:`${a.title} · ${a.company} · ${a.state}`})));
  list('decisions',data.decisions,r=>`${r.decision} · ${r.subject_type} · ${r.reason??''}`,r=>r.attention_id?`/api/reviews/${encodeURIComponent(r.attention_id)}`:null);
  list('runs',data.searchRuns??[],r=>`${r.source_key} · ${r.adapter_id} · ${r.state}${r.error_json?` · ${JSON.parse(r.error_json).code??''}`:''}`,()=>null);
  screeningList(data.screening??[]);
@@ -167,4 +169,104 @@ $('render-form').onsubmit=async event=>{event.preventDefault();
   message('Resume rendered.');
  }catch(error){message(error.message);}};
 $('diagnostics').onclick=async()=>{try{$('diagnostics-data').textContent=JSON.stringify(await request('/api/diagnostics'),null,2);}catch(error){message(error.message);}};
+// --- Application preparation and review ------------------------------------------------
+let applicationAdapters=[];
+function applicationsList(rows){
+ const root=$('applications');root.replaceChildren();
+ if(!rows.length){root.textContent='No applications yet.';return;}
+ for(const row of rows){const line=document.createElement('p');line.className='record-row';
+  line.append(document.createTextNode(`${row.title} · ${row.company} · ${row.state}${row.block_reason?` · ${row.block_reason}`:''} `));
+  line.append(button('Review package',()=>showPackage(row.id)));
+  line.append(button('Raw record',()=>showRecord(`/api/applications/${encodeURIComponent(row.id)}`,'Application')));
+  root.append(line);}
+}
+async function loadApplications(){
+ const data=await request('/api/application-adapters');applicationAdapters=data.adapters;
+ fillSelect('prepare-adapter',data.adapters.map(a=>({value:a.id,label:`${a.id} (v${a.version})${a.capabilities.prepare?'':' · manual handoff'}`})));
+ $('prepare-note').textContent=data.browser.available
+  ?'Supervised browser configured; it fills and previews but never submits.'
+  :'No browser executable configured: only in-process adapters can prepare.';
+}
+function artifactButton(label,hash){return button(label,()=>download(hash));}
+function sourceLink(text,href){const a=document.createElement('a');a.textContent=text;a.href=href;a.rel='noreferrer noopener';a.target='_blank';return a;}
+function jsonBlock(label,value){const box=document.createElement('details');const summary=document.createElement('summary');summary.textContent=label;box.append(summary);
+ const pre=document.createElement('pre');pre.textContent=JSON.stringify(value,null,2);box.append(pre);return box;}
+async function showPackage(applicationId){
+ const pkg=await request(`/api/applications/${encodeURIComponent(applicationId)}/package`);
+ const root=$('package');root.replaceChildren();
+ const add=(tag,text)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;root.append(el);return el;};
+ const application=pkg.application,manifest=pkg.attempt?.manifest??null;
+ add('h3',`${pkg.job?.title??'Application'} · ${pkg.job?.company??''} · ${application.state}`);
+ if(application.block_reason)add('p','Blocked: '+application.block_reason);
+
+ const evidence=add('details');evidence.open=true;const evidenceSummary=document.createElement('summary');
+ evidenceSummary.textContent=`Posting evidence · ${pkg.snapshot?`${pkg.snapshot.completeness} captured ${pkg.snapshot.captured_at}`:'none'}`;evidence.append(evidenceSummary);
+ if(pkg.snapshot){
+  const link=pkg.job?.original_url??pkg.job?.canonical_url??pkg.snapshot.final_url;
+  if(link){const line=document.createElement('p');line.append(sourceLink('Open the original posting',link));evidence.append(line);}
+  if(pkg.snapshot.screenshot_hash)evidence.append(artifactButton('Download full-page screenshot',pkg.snapshot.screenshot_hash));
+  const text=document.createElement('pre');text.textContent=pkg.snapshot.description_text??'(no text captured)';evidence.append(text);
+ } else evidence.append(document.createTextNode('Preparation is blocked until a complete capture exists.'));
+
+ const resume=add('details');const resumeSummary=document.createElement('summary');
+ resumeSummary.textContent=`Selected resume · ${pkg.resume?`${pkg.resume.phase} version ${pkg.resume.id}`:'none selected'}`;resume.append(resumeSummary);
+ if(pkg.resume){
+  resume.append(artifactButton('Download resume text',pkg.resume.text_artifact_hash));
+  resume.append(document.createTextNode(pkg.resume.pdf_artifact_hash?' PDF available.':' PDF output is not implemented; preparation uploads the text artifact.'));
+  if(pkg.agentRun)resume.append(button(`View agent run (${pkg.agentRun.state})`,()=>showRecord(`/api/agents/${encodeURIComponent(pkg.agentRun.id)}`,'Agent run')));
+ } else resume.append(document.createTextNode('Select a resume version before preparing.'));
+
+ if(manifest){
+  add('p',`Prepared ${manifest.preparedAt} with ${manifest.adapterId} v${manifest.adapterVersion}. Manifest ${String(manifest.manifestHash).slice(0,12)}…`);
+  root.append(jsonBlock('Answer set',manifest.answers??{}));
+  const filled=document.createElement('p');filled.textContent=(manifest.filled??[]).length?`Filled: ${(manifest.filled??[]).map(f=>f.field).join(', ')}`:'Filled: no fields';root.append(filled);
+  const uploads=document.createElement('p');uploads.textContent=(manifest.uploads??[]).length?`Uploads: ${(manifest.uploads??[]).map(u=>`${u.field} → ${u.filename} (${u.artifactHash.slice(0,12)}…)`).join(', ')}`:'Uploads: none';root.append(uploads);
+  root.append(jsonBlock('Form fields seen',manifest.fields??[]));
+ } else add('p','No prepared attempt yet. Prepare to create the reviewable manifest.');
+
+ const approval=add('details');approval.open=true;const approvalSummary=document.createElement('summary');
+ approvalSummary.textContent=pkg.approval?`Approval · ${pkg.approval.current?'current':'invalidated by later changes'}`:'Approval · none recorded yet';approval.append(approvalSummary);
+ if(pkg.changesSinceReview){const changes=document.createElement('p');
+  changes.textContent=pkg.changesSinceReview.length?`Changed since review: ${pkg.changesSinceReview.map(c=>c.field).join(', ')}`:'Nothing changed since the approved manifest.';approval.append(changes);
+  approval.append(jsonBlock('Changes since review',pkg.changesSinceReview));}
+ if(pkg.attempt&&pkg.attempt.state==='draft'&&manifest){
+  approval.append(button('Approve this exact manifest',async()=>{
+   const reason=window.prompt('Reason for approving this prepared submission?');if(!reason)return;
+   await request(`/api/attempts/${encodeURIComponent(pkg.attempt.id)}/approve`,{expectedManifestHash:manifest.manifestHash,reason},'POST');
+   message('Approved. Nothing was sent; submission is a separate, later decision.');await showPackage(applicationId);await loadDashboard();}));
+ } else if(pkg.attempt)approval.append(document.createTextNode(`This attempt is ${pkg.attempt.state}; only a draft can be approved.`));
+
+ if(pkg.handoff){
+  const handoff=add('fieldset');const legend=document.createElement('legend');legend.textContent=`Needs you: ${pkg.handoff.code??'handoff'}`;handoff.append(legend);
+  handoff.append(document.createTextNode(`Only an operator can resolve this. Form: ${pkg.handoff.formUrl??'(none)'}`));
+  if(pkg.handoff.formUrl)handoff.append(sourceLink('Open the form',pkg.handoff.formUrl));
+  handoff.append(jsonBlock('Recorded answers',pkg.handoff.answers??{}));
+  const answers=document.createElement('textarea');answers.rows=4;answers.spellcheck=false;answers.value=JSON.stringify(pkg.handoff.answers??{},null,2);
+  const note=document.createElement('input');note.maxLength=2000;note.placeholder='What did you do (login, CAPTCHA, decision)?';note.required=true;
+  handoff.append(document.createTextNode('Answers JSON (merged over the recorded ones)'),answers,document.createTextNode('Resolution note'),note);
+  handoff.append(button('Resolve and prepare again',async()=>{
+   await request(`/api/applications/${encodeURIComponent(applicationId)}/resolve`,{code:pkg.handoff.code,note:note.value,answers:JSON.parse(answers.value)},'POST');
+   message('Handoff resolved; preparation continued on the same application.');await showPackage(applicationId);await loadDashboard();}));
+ }
+
+ const manual=add('fieldset');const manualLegend=document.createElement('legend');manualLegend.textContent='Report a manual completion';manual.append(manualLegend);
+ manual.append(document.createTextNode('If you applied on the site yourself, record what happened. Nothing is sent by this service; your report is stored as evidence.'));
+ const detail=document.createElement('input');detail.maxLength=2000;detail.placeholder='Submitted on the employer site';detail.required=true;
+ const receipt=document.createElement('textarea');receipt.rows=3;receipt.placeholder='Confirmation text or reference number you were shown (optional)';receipt.maxLength=200000;
+ manual.append(document.createTextNode('What happened'),detail,document.createTextNode('Receipt as shown to you'),receipt);
+ manual.append(button('Record manual completion',async()=>{
+  await request(`/api/applications/${encodeURIComponent(applicationId)}/manual-completion`,{detail:detail.value,receiptText:receipt.value||undefined},'POST');
+  message('Manual completion recorded with the receipt you supplied.');await showPackage(applicationId);await loadDashboard();}));
+
+ root.append(button('Reload package',()=>showPackage(applicationId)));
+ message('Review package loaded.');
+}
+$('prepare-form').onsubmit=async event=>{event.preventDefault();
+ const applicationId=$('prepare-application').value;if(!applicationId){message('Choose an application first.');return;}
+ const submit=$('prepare-submit');submit.disabled=true;
+ try{
+  const outcome=await request(`/api/applications/${encodeURIComponent(applicationId)}/prepare`,{adapterId:$('prepare-adapter').value,formUrl:$('prepare-url').value,answers:JSON.parse($('prepare-answers').value||'{}')},'POST');
+  message(outcome.state==='draft'?`Prepared and ready for review (attempt ${String(outcome.attemptId).slice(0,8)}).`:`${outcome.state}: ${outcome.code} — ${outcome.detail}`);
+  await showPackage(applicationId);await loadDashboard();
+ }catch(error){message(error.message);}finally{submit.disabled=false;}};
 if($('token').value)void load();

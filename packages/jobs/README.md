@@ -208,11 +208,16 @@ non-submitting preview control. Routes: `GET /api/application-adapters`,
 `POST /api/applications/:id/prepare`, `GET /api/applications/:id/package`,
 `POST /api/applications/:id/resolve`, `POST /api/applications/:id/manual-completion`,
 `POST /api/attempts/:id/approve`. Approving binds to one attempt's manifest hash;
-preparing different evidence or answers cancels the prior approval. Still outstanding:
-the `jobs-ui` review screen. Nothing here transmits a submission.
+preparing different evidence or answers cancels the prior approval. The `jobs-ui` review screen (`Application preparation`) prepares, shows the package
+(posting text, screenshot, source link, selected resume and its agent run, the answer set,
+filled fields and uploads, what changed since the last review), approves one exact
+manifest, resolves a handoff and records a manual completion. Nothing here transmits a
+submission; there is deliberately no submission route yet.
 
 ```sh
 npm run jobs:build
+node packages/jobs-ui/build.mjs            # the service serves packages/jobs-ui/dist
+node packages/jobs/acceptance/review.mjs   # routes, plus the screen with JOBS_BROWSER_EXECUTABLE
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/forms.mjs
 ```
 

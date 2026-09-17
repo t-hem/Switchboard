@@ -130,11 +130,13 @@ export class PreparationService {
     return file;
   }
 
-  #idempotencyKey(input: { applicationId: string; adapterId: string; formUrl: string; answers: Record<string, string>; settingsRevision: number },
+  #idempotencyKey(input: { applicationId: string; adapterId: string; formUrl: string; answers: Record<string, string>; settingsRevision: number; adapterOptions?: Record<string, unknown> },
     snapshot: Record<string, unknown>, resume: Record<string, unknown>): string {
     const answersHash = digest(Object.keys(input.answers).sort().map(key => [key, input.answers[key]]));
+    // Adapter options change what the adapter does, so they are part of the inputs too.
     return digest({ applicationId: input.applicationId, snapshot: snapshot["content_hash"], resume: resume["text_artifact_hash"],
-      settingsRevision: input.settingsRevision, adapterId: input.adapterId, formUrl: input.formUrl, answersHash });
+      settingsRevision: input.settingsRevision, adapterId: input.adapterId, formUrl: input.formUrl, answersHash,
+      adapterOptionsHash: digest(input.adapterOptions ?? null) });
   }
 
   /** A handoff is a durable inbox item, not an alert: resume, answers and URL included. */
@@ -166,7 +168,7 @@ export class PreparationService {
     });
     reviews.open({ taskId: task.id, subjectType: "application-handoff", subjectId: input.applicationId, subjectVersion: `${code}:${context["snapshotId"]}`,
       title: `${adapter.id}: ${code}`, detail,
-      context: { ...context, formUrl: context["formUrl"] ?? input.formUrl, answers: input.answers, adapterId: adapter.id, adapterVersion: adapter.version },
+      context: { ...context, code, formUrl: context["formUrl"] ?? input.formUrl, answers: input.answers, adapterId: adapter.id, adapterVersion: adapter.version },
       settingsRevision: input.settingsRevision });
     event(db, "application.needs_input", "application", input.applicationId, { code, taskId: task.id }, this.now());
     return { attemptId: null, created: true, state: "needs_input", code, detail };
