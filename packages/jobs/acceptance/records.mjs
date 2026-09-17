@@ -179,6 +179,7 @@ try{
  children.length=0;
  await delay(500);
  assert.deepEqual(hostHits,[],'the jobs service never contacted the Switchboard host');
+ await new Promise(resolve=>host.close(resolve)); // an open listener would keep the script alive after PASS
  console.log('records acceptance: ALL PASS');
 }finally{
  for(const child of children)await stop(child);
