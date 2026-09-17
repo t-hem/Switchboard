@@ -350,7 +350,27 @@ Unlike §2, these are not exclusions. They are the next things, written down so 
 
   What has *not* changed is that this is the largest single increase in moving parts the daemon could take on — session discovery, reattachment, tmux's own failure modes, and a second source of truth about what is running alongside the ledger. Treat "restart between tasks" as the baseline it is competing against, not as a problem that obviously needs solving.
 
-- **Idle push notifications.** The amber "waiting for input" state is exactly the signal worth pushing. An `ntfy` or Telegram POST when a session crosses the idle threshold would mean not having to check at all. Small addition once §5.2 exists. Note that this is the same need as a pipeline's "tell me where it got stuck" — one mechanism should serve both.
+- **Push notification when a session wants attention.** Worth having: the moment an agent stops and waits, a push to the phone means not having to check at all. This is the same need as a pipeline's "tell me where it got stuck" — one mechanism should serve both. Investigated 2026-09-17; **not started**, and the detection problem is the whole of it.
+
+  The original note here proposed pushing when a session crosses the amber idle threshold. That is a crude proxy and should not be built as the primary signal: a long build and a permission prompt are both silence, and only one of them is worth waking a phone for.
+
+  Ruled out by measurement on a live fleet, so they are not re-litigated:
+
+  - **Cursor visibility** (`#{cursor_flag}`, already captured in the display snapshot). Reads `1` on every pane including one actively working. No discrimination.
+  - **Alternate screen** (`#{alternate_on}`). Unused by the agents in play.
+  - **Per-agent wording patterns.** Brittle by nature, and `agents.json` is fleet-synced (§5.5), so a pattern that misfires does so on every machine at once. The §2 carve-out that permits `display` patterns is for decoration; an alert that cries wolf is not decoration.
+
+  Two mechanisms that do work, with different costs:
+
+  - **The terminal bell.** `BEL` (0x07) in the PTY stream is the standard terminal convention for "I want attention", and Claude Code can be told to emit it (`preferredNotifChannel: "terminal_bell"`, confirmed present in the shipped binary). The daemon already reads every byte, so surfacing an `attentionAt` on the session is the same shape as the `title` it already derives, and any CLI that rings the bell is covered with no config line. This is the agent-agnostic option.
+  - **The harness's own hook.** Claude Code fires a `Notification` hook exactly when it needs permission or input (also confirmed in the binary). Exact, no heuristics, and needs nothing from the daemon at all — the hook can POST directly. It is Claude-only, and it does not know its Switchboard session id, so the alert cannot name the row it came from.
+
+  Two caveats that decide this and are the reason it is still deferred:
+
+  1. **The bell signals "wants attention", not "is blocked".** The same channel fires when Claude finishes its agent loop, and sometimes when a model in `pi` does. Wanting to know about a finished run is reasonable, but it is a different alert from a blocked one, and the bell cannot tell them apart. A harness's own events can — Claude Code separates `Notification` from `Stop` — so the exact signal and the portable signal are not the same signal.
+  2. **Emission is not guaranteed.** Whether a given harness rings the bell at the right moments, or at all, is up to that harness. The mechanism can be right and the coverage still poor.
+
+  Whatever is built, the pushing lives **outside the daemon** (§2). Switchboard exposes the signal and a separate program polls `GET /sessions` and sends the notification; the daemon never holds an `ntfy` token or posts to a third party. A notifier that wants to say *what* is being asked would be the first real caller for the scrollback endpoint below.
 
 - **Reading a session's output without attaching to it.** Today the scrollback buffer is reachable only by opening the WebSocket, and that upgrade is claim-gated (§6). So a program that wants to know *what an agent actually did* must either take the claim — evicting whoever is at a browser — or not look. Both pipelines below need to look.
 
