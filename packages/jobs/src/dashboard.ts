@@ -1,12 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import { ArtifactStore } from "./artifacts.js";
-import { Reviews } from "./reviews.js";
+import type { Services } from "./services.js";
+import type { ArtifactStore } from "./artifacts.js";
 import { AppError } from "./errors.js";
 import { SCHEMA_VERSION } from "./database.js";
 
-export function dashboardRoutes(app:FastifyInstance,store:SettingsStore,dir:string):void{
-  const db=store.db,artifacts=new ArtifactStore(db,dir,{readOnly:true}),reviews=new Reviews(db);
+export function dashboardRoutes(app:FastifyInstance,{db,artifacts,reviews}:Services):void{
   app.get("/api/dashboard",async()=>({schemaVersion:SCHEMA_VERSION,limit:100,
     counts:Object.fromEntries(["jobs","applications","tasks","agent_runs","artifacts","resume_versions","screening_decisions"].map(table=>[table,Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()!["n"])])),
     attention:db.prepare("SELECT id,title,detail,state,version,settings_revision,task_id,run_id,artifact_hash,created_at FROM attention_items WHERE state='open' ORDER BY created_at LIMIT 100").all(),

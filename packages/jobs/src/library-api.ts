@@ -1,21 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
 import { AppError } from "./errors.js";
-import { ArtifactStore } from "./artifacts.js";
-import { Library } from "./library.js";
-import { ResumeRenderer } from "./resume.js";
+import type { Services } from "./services.js";
 
 /**
  * Career-library and resume-render surface. Facts, bullets and templates are versioned
  * revisions of operator material; rendering produces a structured source plus a text
  * artifact. PDF output is deliberately deferred (a later stage may add it).
  */
-export function libraryRoutes(app: FastifyInstance, store: SettingsStore, dir: string, now?: () => number): void {
-  const db = store.db;
-  const artifacts = new ArtifactStore(db, dir);
-  const library = new Library(db, now);
-  const renderer = new ResumeRenderer(db, artifacts, library, now);
-
+export function libraryRoutes(app: FastifyInstance, { library, renderer }: Services): void {
   app.get("/api/library", async () => {
     const profiles = library.profiles(), templates = library.templates();
     const latest = profiles.length ? profiles[profiles.length - 1]! : null;

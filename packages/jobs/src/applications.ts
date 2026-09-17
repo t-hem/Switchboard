@@ -1,4 +1,5 @@
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { jsonDigest as digest } from "./evidence.js";
 import type { DatabaseSync } from "node:sqlite";
 import { transaction } from "./database.js";
 import { event } from "./events.js";
@@ -6,7 +7,6 @@ import { AppError } from "./errors.js";
 import { type ArtifactStore } from "./artifacts.js";
 
 /** Stable hash of any JSON value; used to detect a changed manifest or reviewed field. */
-const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 /** The fields whose change invalidates a prior review; anything here must be re-reviewed. */
 const REVIEWED_FIELDS = ["snapshotContentHash", "resumeTextHash", "settingsRevision", "adapterId", "adapterVersion", "formUrl", "answers", "filled", "uploads"] as const;

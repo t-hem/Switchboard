@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { dashboardRoutes } from "./dashboard.js";
-import { postingsRoutes, type PostingsDeps } from "./postings-api.js";
+import { postingsRoutes } from "./postings-api.js";
+import { createServices, type ServiceDeps, type Services } from "./services.js";
 import { libraryRoutes } from "./library-api.js";
 import { personasRoutes } from "./personas-api.js";
 import { runnerRoutes } from "./runner-api.js";
@@ -22,7 +23,8 @@ import { settingsUpdateSchema, type Settings } from "./settings.js";
 import type { SettingsStore } from "./store.js";
 
 export function buildServer(config:ServiceConfig, store:SettingsStore, dir:string,
-  options:{uiDir?:URL; deps?:PostingsDeps; browser?:SupervisedBrowser} = {}) {
+  options:{uiDir?:URL; deps?:ServiceDeps; browser?:SupervisedBrowser; services?:Services} = {}) {
+  const services = options.services ?? createServices(config, store, dir, {...options.deps, browser:options.deps?.browser ?? options.browser});
   const uiDir = options.uiDir ?? new URL("../../jobs-ui/dist/", import.meta.url);
   const app = Fastify({logger:false,bodyLimit:256*1024,ajv:{customOptions:{coerceTypes:false,removeAdditional:false,useDefaults:false}}});
 
@@ -54,7 +56,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     return reply.code(status).send({error:{code:status===500?"internal_error":"invalid_request",message:status===500?"Operation failed; previous committed data is retained":"Invalid request",fields:[]}});
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
-  app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
+  app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db,services.now?.()),dataDirectory:dir,
     capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true,submissions:Boolean(config.browserExecutablePath),records:true},
     readOnly:isReadOnly(dir),
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
@@ -70,16 +72,8 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
       throw new AppError("unknown_provider","Invocation adapter is not registered",400,[{path:"/spawner/invocationAdapter",message:"No registered invocation adapter by that id"}]);
     return store.update(req.body.expectedRevision,req.body.value);
   });
-  dashboardRoutes(app,store,dir);
-  postingsRoutes(app,store,dir,config,{...options.deps,browser:options.browser});
-  applicationsRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
-  submissionRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
-  recordsRoutes(app,store,dir,{now:options.deps?.now});
-  libraryRoutes(app,store,dir);
-  personasRoutes(app,store);
-  schedulerRoutes(app,store,dir,config);
-  screeningRoutes(app,store);
-  runnerRoutes(app,store,dir,config);
+  for (const routes of [dashboardRoutes,postingsRoutes,applicationsRoutes,submissionRoutes,recordsRoutes,libraryRoutes,personasRoutes,schedulerRoutes,screeningRoutes,runnerRoutes])
+    routes(app,services);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{
       const file=new URL(name,uiDir);
@@ -88,6 +82,6 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
       return reply.type(type).send(fs.readFileSync(file));
     });
   }
-  app.addHook("onClose",async()=>{store.close();});
+  app.addHook("onClose",async()=>{await services.capture?.close();store.close();});
   return app;
 }

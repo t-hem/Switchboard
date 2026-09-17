@@ -1,36 +1,16 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import type { ServiceConfig } from "./config.js";
 import { AppError } from "./errors.js";
-import { ArtifactStore } from "./artifacts.js";
-import { Postings } from "./postings.js";
-import { Sources } from "./sources.js";
-import { Discovery } from "./discovery.js";
-import { FetchHttpClient, type HttpClient } from "./net.js";
-import { CaptureService, BrowserPageCapture } from "./capture.js";
-import type { SupervisedBrowser } from "./browser.js";
 import { createSourceAdapter, sourceAdapterIds } from "./adapters/source.js";
-import "./adapters/greenhouse.js";
-import "./adapters/fixture.js";
+import type { ServiceDeps, Services } from "./services.js";
 
-export type PostingsDeps = { http?: HttpClient; capture?: CaptureService | null; now?: () => number; browser?: SupervisedBrowser };
+export type PostingsDeps = ServiceDeps;
 
 /**
  * Import/capture surface for job postings. Every route is behind the jobs bearer token
  * (registered by the server's auth hook). An unavailable browser or disabled source is
  * reported as such; nothing falls back to an invisible or synthetic success.
  */
-export function postingsRoutes(app: FastifyInstance, store: SettingsStore, dir: string, config: ServiceConfig, deps: PostingsDeps = {}): void {
-  const db = store.db;
-  const artifacts = new ArtifactStore(db, dir);
-  const postings = new Postings(db, artifacts, deps.now);
-  const sources = new Sources(db, deps.now);
-  const http = deps.http ?? new FetchHttpClient({ allowPrivate: config.allowPrivateImport === true });
-  const discovery = new Discovery(db, sources, postings, artifacts, http, deps.now);
-  const browserCapture = config.browserExecutablePath ? new CaptureService(new BrowserPageCapture(config.browserExecutablePath, deps.browser)) : null;
-  const capture = deps.capture !== undefined ? deps.capture : browserCapture;
-  app.addHook("onClose", async () => { await capture?.close(); });
-
+export function postingsRoutes(app: FastifyInstance, { store, config, postings, sources, discovery, capture }: Services): void {
   app.get("/api/sources", async () => ({
     adapters: sourceAdapterIds().map(id => { const adapter = createSourceAdapter(id); return { id, version: adapter.version, capabilities: adapter.capabilities }; }),
     sources: sources.list(),

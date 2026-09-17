@@ -1,12 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import type { ServiceConfig } from "./config.js";
+import type { Services } from "./services.js";
 import { AppError } from "./errors.js";
-import { ArtifactStore } from "./artifacts.js";
-import { Library } from "./library.js";
-import { ResumeRenderer } from "./resume.js";
-import { TaskQueue } from "./queue.js";
-import { Reviews } from "./reviews.js";
 import { TailoringRunner } from "./runner.js";
 import { createInvocationAdapter } from "./invocation.js";
 import { createSpawner } from "./adapters/spawner.js";
@@ -16,8 +10,7 @@ import { createSpawner } from "./adapters/spawner.js";
  * when a private host token is configured; without it the route reports the missing
  * capability instead of attempting a spawn. A real worker/scheduler wires this in step 8.
  */
-export function runnerRoutes(app: FastifyInstance, store: SettingsStore, dir: string, config: ServiceConfig): void {
-  const db = store.db;
+export function runnerRoutes(app: FastifyInstance, { store, db, dir, config, artifacts, library, renderer, queue, reviews }: Services): void {
   // Rebuilt whenever settings change, so a new spawner, adapter or persona directory takes
   // effect on the next run without a restart. A run already in flight keeps its own runner.
   let cached: { revision: number; runner: TailoringRunner } | null = null;
@@ -25,10 +18,8 @@ export function runnerRoutes(app: FastifyInstance, store: SettingsStore, dir: st
     if (!config.spawnerToken) throw new AppError("spawner_unconfigured", "A host token is not configured in service.json; tailoring cannot spawn", 409);
     const { revision, value: settings } = store.current();
     if (cached?.revision === revision) return cached.runner;
-    const artifacts = new ArtifactStore(db, dir);
     const runner = new TailoringRunner({
-      db, artifacts, library: new Library(db), renderer: new ResumeRenderer(db, artifacts, new Library(db)),
-      queue: new TaskQueue(db), reviews: new Reviews(db), personasDir: settings.personaDirectory,
+      db, artifacts, library, renderer, queue, reviews, personasDir: settings.personaDirectory,
       // Provider and invocation adapter come from settings; swapping either is a settings change.
       spawner: createSpawner(settings.spawner.provider, { baseUrl: settings.spawner.baseUrl, token: config.spawnerToken }),
       invocation: createInvocationAdapter(settings.spawner.invocationAdapter ?? "pi"), dataDir: dir,

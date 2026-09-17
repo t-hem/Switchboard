@@ -1,10 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import { Screening } from "./screening.js";
+import type { Services } from "./services.js";
 
 /** Screening history plus the operator skip/requeue actions (each an audit event). */
-export function screeningRoutes(app: FastifyInstance, store: SettingsStore): void {
-  const screening = new Screening(store.db);
+export function screeningRoutes(app: FastifyInstance, { store, screening }: Services): void {
   app.get("/api/screening", async () => {
     const decisions = screening.list(100);
     return { decisions, counts: Object.fromEntries(["eligible", "excluded", "needs_review", "skipped"].map(decision =>

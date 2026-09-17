@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createHash } from "node:crypto";
+import { digest as sha256 } from "./artifacts.js";
 import { AppError } from "./errors.js";
 
 /**
@@ -131,7 +131,7 @@ export function listPersonas(directory: string): { personas: Persona[]; errors: 
   return { personas: personas.sort((a, b) => a.id.localeCompare(b.id)), errors };
 }
 
-const digest = (value: string): string => createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+const digest = (value: string): string => sha256(Buffer.from(value, "utf8"));
 
 export type PersonaSnapshot = {
   persona: Persona; skills: Skill[];

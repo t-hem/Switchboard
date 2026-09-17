@@ -1,6 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { SettingsStore } from "./store.js";
 import { transaction } from "./database.js";
@@ -10,9 +8,11 @@ import type { ArtifactStore } from "./artifacts.js";
 import { Reviews } from "./reviews.js";
 import { TaskQueue } from "./queue.js";
 import type { HttpClient } from "./net.js";
-import { createApplicationAdapter, type ApplicationAdapter, type FileUpload, type FormSession } from "./adapters/application.js";
+import { createApplicationAdapter, type ApplicationAdapter, type FormSession } from "./adapters/application.js";
+import { MAX_CAPTURE_AGE_MS, jsonDigest as digest, resumeUpload } from "./evidence.js";
+import { policyScope } from "./policies.js";
 
-export const MAX_CAPTURE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export { MAX_CAPTURE_AGE_MS } from "./evidence.js";
 
 export type PreparationOutcome = {
   attemptId: string | null;
@@ -23,8 +23,6 @@ export type PreparationOutcome = {
   manifest?: Record<string, unknown>;
 };
 
-const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const resumeFilename = (applicationId: string): string => `resume-${applicationId.slice(0, 8)}.txt`;
 
 /**
  * Prepares an application up to (but never past) human review. It refreshes and verifies
@@ -80,9 +78,8 @@ export class PreparationService {
       if (inspection.captcha) return this.#handoff(input, adapter, "captcha", "The form presents a CAPTCHA; complete it manually", snapshot, resumeId, inspection.formUrl);
       if (inspection.automationForbidden) return this.#handoff(input, adapter, "forbidden_automation", "Automation is not permitted for this target", snapshot, resumeId, inspection.formUrl);
 
-      const resumeUpload: FileUpload = { field: "resume", artifactHash: String(resume["text_artifact_hash"]), filename: resumeFilename(String(application["id"])),
-        mimeType: "text/plain", localPath: this.#stageResume(String(application["id"]), resumeBytes) };
-      const prepared = await adapter.prepare({ inspection, answers: input.answers, resume: resumeUpload }, context);
+      const upload = resumeUpload(this.deps.artifacts, String(application["id"]), String(resume["text_artifact_hash"]), resumeBytes);
+      const prepared = await adapter.prepare({ inspection, answers: input.answers, resume: upload }, context);
       if (prepared.missing.length) return blocked("unsupported_required_fields", `Required fields could not be filled: ${prepared.missing.join(", ")}`);
 
       const manifest: Record<string, unknown> = {
@@ -115,19 +112,6 @@ export class PreparationService {
       // The supervised browser session never outlives one preparation.
       await session?.close().catch(() => undefined);
     }
-  }
-
-  /**
-   * The artifact store is content-addressed, so a raw artifact path would present the site
-   * a file named after its digest. Stage a verified copy under the application's own name
-   * and upload that; the manifest still records the artifact hash the bytes must match.
-   */
-  #stageResume(applicationId: string, bytes: Buffer): string {
-    const directory = path.join(this.deps.artifacts.root, "uploads");
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const file = path.join(directory, resumeFilename(applicationId));
-    fs.writeFileSync(file, bytes, { mode: 0o600 });
-    return file;
   }
 
   #idempotencyKey(input: { applicationId: string; adapterId: string; formUrl: string; answers: Record<string, string>; settingsRevision: number; adapterOptions?: Record<string, unknown> },
@@ -184,7 +168,7 @@ export class PreparationService {
   }
 
   #policy(adapterId: string, formUrl: string): string {
-    const scopeKey = `${adapterId}:${(() => { try { return new URL(formUrl).host; } catch { return formUrl; } })()}`;
+    const scopeKey = policyScope(adapterId, formUrl);
     const existing = this.deps.db.prepare("SELECT id FROM source_policies WHERE scope_key=? ORDER BY revision DESC LIMIT 1").get(scopeKey) as Record<string, unknown> | undefined;
     if (existing) return String(existing["id"]);
     const id = randomUUID();

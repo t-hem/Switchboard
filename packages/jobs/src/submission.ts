@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { SettingsStore } from "./store.js";
 import { transaction } from "./database.js";
@@ -10,17 +8,17 @@ import { Reviews } from "./reviews.js";
 import { TaskQueue } from "./queue.js";
 import type { HttpClient } from "./net.js";
 import { Policies, type Policy } from "./policies.js";
-import { createApplicationAdapter, type ApplicationAdapter, type FileUpload, type FormSession, type SubmitOutcome } from "./adapters/application.js";
+import { createApplicationAdapter, type ApplicationAdapter, type FormSession, type SubmitOutcome } from "./adapters/application.js";
+import { MAX_CAPTURE_AGE_MS, resumeUpload } from "./evidence.js";
 
 /** How long a `submitting` attempt may stay unresolved before it is honestly called unknown. */
 export const SUBMISSION_GRACE_MS = 10 * 60 * 1000;
-export const MAX_CAPTURE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export { MAX_CAPTURE_AGE_MS } from "./evidence.js";
 
 export type Gate = { code: string; detail: string };
 export type SubmitResult = { attemptId: string; state: string; outcome: string | null; receiptHash: string | null;
   externalId: string | null; blocked: Gate | null; reconciledFrom?: string };
 
-const resumeFilename = (applicationId: string): string => `resume-${applicationId.slice(0, 8)}.txt`;
 
 /** Wraps a form session so the service knows whether the adapter pressed the submit control. */
 function trackSubmit(inner: FormSession): { session: FormSession; pressed: () => boolean } {
@@ -93,8 +91,7 @@ export class SubmissionService {
     let result: SubmitOutcome;
     const tracked = this.createSession ? trackSubmit(this.createSession()) : undefined;
     try {
-      const resume: FileUpload = { field: "resume", artifactHash: String(manifest["resumeTextHash"]), filename: resumeFilename(applicationId),
-        mimeType: "text/plain", localPath: this.#stageResume(applicationId, String(manifest["resumeTextHash"])) };
+      const resume = resumeUpload(this.deps.artifacts, applicationId, String(manifest["resumeTextHash"]));
       result = await adapter.submit({ attemptId, formUrl, idempotencyKey: String(attempt["idempotency_key"]),
         answers: (manifest["answers"] ?? {}) as Record<string, string>, resume }, { http: this.deps.http, allowPrivate: true, session: tracked?.session });
     } catch (error) {
@@ -245,16 +242,6 @@ export class SubmissionService {
     try { this.deps.artifacts.read(String(manifest["resumeTextHash"])); }
     catch { return { code: "corrupt_resume", detail: "The resume artifact is missing or corrupt; nothing was sent" }; }
     return null;
-  }
-
-  /** The artifact store is content-addressed, so the site gets a properly named copy. */
-  #stageResume(applicationId: string, hash: string): string {
-    const bytes = this.deps.artifacts.read(hash);
-    const directory = path.join(this.deps.artifacts.root, "uploads");
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const file = path.join(directory, resumeFilename(applicationId));
-    fs.writeFileSync(file, bytes, { mode: 0o600 });
-    return file;
   }
 
   #recordRefusal(attemptId: string, applicationId: string, gate: Gate, actor: string): void {

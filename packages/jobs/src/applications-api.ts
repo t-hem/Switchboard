@@ -1,16 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import type { ServiceConfig } from "./config.js";
 import { AppError } from "./errors.js";
-import { ArtifactStore } from "./artifacts.js";
-import { Applications } from "./applications.js";
-import { PreparationService } from "./preparation.js";
-import { FetchHttpClient, type HttpClient } from "./net.js";
-import { createApplicationAdapter, applicationAdapterIds, type FormSession } from "./adapters/application.js";
-import { PuppeteerFormSession } from "./form.js";
-import type { SupervisedBrowser } from "./browser.js";
-
-export type ApplicationsDeps = { browser?: SupervisedBrowser; http?: HttpClient; now?: () => number; createSession?: () => FormSession };
+import { createApplicationAdapter, applicationAdapterIds } from "./adapters/application.js";
+import type { Services } from "./services.js";
 
 /**
  * Preparation, review package, approval and manual reconciliation. Preparation is the only
@@ -18,14 +9,7 @@ export type ApplicationsDeps = { browser?: SupervisedBrowser; http?: HttpClient;
  * against one attempt's manifest hash, and a later prepare with different evidence or
  * answers cancels that approval.
  */
-export function applicationsRoutes(app: FastifyInstance, store: SettingsStore, dir: string, config: ServiceConfig, deps: ApplicationsDeps = {}): void {
-  const db = store.db;
-  const artifacts = new ArtifactStore(db, dir);
-  const applications = new Applications({ db, artifacts, now: deps.now });
-  const http = deps.http ?? new FetchHttpClient({ allowPrivate: config.allowPrivateImport === true });
-  const createSession = deps.createSession ?? (deps.browser ? () => new PuppeteerFormSession(deps.browser!) : undefined);
-  const preparation = new PreparationService({ store, db, artifacts, http, now: deps.now, createSession });
-
+export function applicationsRoutes(app: FastifyInstance, { store, config, applications, preparation, createSession }: Services): void {
   app.get("/api/application-adapters", async () => ({
     adapters: applicationAdapterIds().map(id => { const adapter = createApplicationAdapter(id); return { id, version: adapter.version, capabilities: adapter.capabilities }; }),
     browser: { available: config.browserExecutablePath !== undefined, supervised: createSession !== undefined },

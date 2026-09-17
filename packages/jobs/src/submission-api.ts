@@ -1,30 +1,15 @@
 import type { FastifyInstance } from "fastify";
-import type { SettingsStore } from "./store.js";
-import type { ServiceConfig } from "./config.js";
 import { AppError } from "./errors.js";
-import { ArtifactStore } from "./artifacts.js";
 import { Policies } from "./policies.js";
-import { SubmissionService } from "./submission.js";
-import { FetchHttpClient, type HttpClient } from "./net.js";
-import type { FormSession } from "./adapters/application.js";
-import { PuppeteerFormSession } from "./form.js";
-import type { SupervisedBrowser } from "./browser.js";
-
-export type SubmissionDeps = { browser?: SupervisedBrowser; http?: HttpClient; now?: () => number; createSession?: () => FormSession };
+import type { Services } from "./services.js";
 
 /**
  * Sending, reconciliation and site policy. `POST /api/attempts/:id/submit` is the only route
  * in the service that performs an external write, and it refuses unless every gate, the
  * effective policy and the evidence all pass at that moment.
  */
-export function submissionRoutes(app: FastifyInstance, store: SettingsStore, dir: string, config: ServiceConfig, deps: SubmissionDeps = {}): void {
-  const db = store.db;
-  const artifacts = new ArtifactStore(db, dir);
-  const http = deps.http ?? new FetchHttpClient({ allowPrivate: config.allowPrivateImport === true });
-  const createSession = deps.createSession ?? (deps.browser ? () => new PuppeteerFormSession(deps.browser!) : undefined);
-  const submission = new SubmissionService({ store, db, artifacts, http, now: deps.now, createSession });
-
-  app.get("/api/policies", async () => ({ policies: new Policies(db, deps.now).list(), scopes: db.prepare("SELECT DISTINCT scope_key FROM source_policies ORDER BY scope_key").all().map(row => String((row as Record<string, unknown>)["scope_key"])) }));
+export function submissionRoutes(app: FastifyInstance, { store, db, now, submission, createSession }: Services): void {
+  app.get("/api/policies", async () => ({ policies: new Policies(db, now).list(), scopes: db.prepare("SELECT DISTINCT scope_key FROM source_policies ORDER BY scope_key").all().map(row => String((row as Record<string, unknown>)["scope_key"])) }));
 
   app.put<{ Body: { adapterId: string; siteUrl: string; capabilities: { prepare: boolean; fill: boolean; upload: boolean; submit: boolean }; restrictions?: { autoSubmit?: boolean; maxPerDay?: number; notes?: string }; termsUrl?: string } }>("/api/policies", {
     schema: { body: { type: "object", additionalProperties: false, required: ["adapterId", "siteUrl", "capabilities"],
@@ -33,7 +18,7 @@ export function submissionRoutes(app: FastifyInstance, store: SettingsStore, dir
           properties: { prepare: { type: "boolean" }, fill: { type: "boolean" }, upload: { type: "boolean" }, submit: { type: "boolean" } } },
         restrictions: { type: "object", additionalProperties: false, properties: { autoSubmit: { type: "boolean" }, maxPerDay: { type: "integer", minimum: 0, maximum: 1000 }, notes: { type: "string", maxLength: 2000 } } },
         termsUrl: { type: "string", maxLength: 2048 } } } },
-  }, async req => new Policies(db, deps.now).put({ ...req.body, reviewedBy: "operator" }));
+  }, async req => new Policies(db, now).put({ ...req.body, reviewedBy: "operator" }));
 
   app.get("/api/submissions", async () => ({
     submissions: db.prepare(`SELECT a.id,a.application_id,a.adapter_id,a.state,a.send_started_at,a.finished_at,a.outcome_json,a.receipt_hash,
