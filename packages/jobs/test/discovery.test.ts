@@ -46,6 +46,11 @@ test("a paginated source is checkpointed, resumed and never duplicated", async (
   assert.equal(resumed.checkpoint, null);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM jobs").get()!.n, 5);
 
+  // A completed scan supersedes the old partial one: the next resumable run starts over.
+  assert.equal(discovery.resumeCheckpoint("acme"), null);
+  const rescan = await discovery.run("acme", { settingsRevision: 1, cap: 10, resume: true });
+  assert.equal(rescan.discovered, 5, "a stale checkpoint must not skip the start of the board forever");
+
   // Repeating a full discovery creates no duplicates and no duplicate applications.
   const repeat = await discovery.run("acme", { settingsRevision: 1, cap: 10 });
   assert.equal(repeat.created, 0);

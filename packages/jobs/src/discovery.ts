@@ -31,11 +31,15 @@ export class Discovery {
     this.screening = new Screening(db, now);
   }
 
-  /** The resume point left by the source's last blocked/partial run, if any. */
+  /**
+   * The resume point left by the source's most recent finished run, if that run stopped
+   * early. A later completed scan supersedes any older partial one: resuming from an old
+   * checkpoint would skip the start of the board on every run after it.
+   */
   resumeCheckpoint(sourceId: string): unknown | null {
-    const row = this.db.prepare(`SELECT checkpoint_json FROM search_runs WHERE source_id=? AND state='blocked' AND checkpoint_json IS NOT NULL
+    const row = this.db.prepare(`SELECT state,checkpoint_json FROM search_runs WHERE source_id=? AND state IN('completed','blocked','failed')
       ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(sourceId) as Record<string, unknown> | undefined;
-    if (!row) return null;
+    if (!row || row["state"] === "completed" || row["checkpoint_json"] === null) return null;
     try { return JSON.parse(String(row["checkpoint_json"])); } catch { return null; }
   }
 
