@@ -92,6 +92,35 @@ test("snapshots are write-once, gated by completeness, and archive changed posti
   assert.equal(Buffer.from(postings.artifacts.read(first.screenshotHash!)).toString(), "png-bytes");
 });
 
+test("recapturing unchanged text renews freshness once the latest capture is old, and never resolves to an older capture", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-postings-"));
+  const store = new SettingsStore(path.join(dir, "jobs.sqlite"));
+  t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  let now = 1_800_000_000_000;
+  const postings = new Postings(store.db, new ArtifactStore(store.db, dir), () => now);
+  const { jobId } = postings.ingest({ adapterId: "fixture", company: "Acme", title: "Analyst", descriptionText: "v1", provenance: "browser", originalUrl: "https://example.com/jobs/11" });
+  const capture = (text: string) => postings.recordSnapshot({ jobId, purpose: "discovery", fetchedUrl: "u", finalUrl: "u", descriptionText: text,
+    screenshot: Buffer.from("png"), captureVersion: "browser:1", capture: {}, completeness: "complete" });
+  const first = capture("Same text");
+  now += 60_000;
+  assert.equal(capture("Same text").snapshotId, first.snapshotId, "an immediate recapture is deduplicated");
+
+  now += 8 * 24 * 60 * 60 * 1000;
+  const renewed = capture("Same text");
+  assert.equal(renewed.created, true, "a week-old capture must be renewable, or freshness gates block the job forever");
+  const latest = store.db.prepare("SELECT id,captured_at FROM job_snapshots WHERE job_id=? ORDER BY captured_at DESC LIMIT 1").get(jobId)!;
+  assert.equal(latest.id, renewed.snapshotId);
+  assert.equal(latest.captured_at, new Date(now).toISOString());
+
+  now += 60_000;
+  const changed = capture("Changed text");
+  now += 60_000;
+  const back = capture("Same text");
+  assert.equal(back.created, true, "text that changed back is a new observation, not the older snapshot");
+  assert.notEqual(back.snapshotId, renewed.snapshotId);
+  assert.notEqual(changed.snapshotId, back.snapshotId);
+});
+
 test("snapshot evidence cannot be edited or deleted after the fact", (t) => {
   const { store, postings } = fixture(t);
   const { jobId } = postings.ingest({ adapterId: "fixture", company: "Acme", title: "Ops", descriptionText: "v1", provenance: "browser", originalUrl: "https://example.com/jobs/10" });

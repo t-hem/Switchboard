@@ -1126,8 +1126,9 @@ Approved to proceed; see implementation entries below.
 - `postings.ts` canonicalizes URLs (lowercased host, sorted query, tracking params and
   fragments stripped, trailing slash removed) and dedups on the scheme-insensitive
   canonical form, so an http→https redirect or a shared canonical URL from two sources
-  yields one posting and one application. Snapshots are write-once, dedup within the
-  same capture method/version, gate "complete" on non-empty text (and a screenshot for
+  yields one posting and one application. Snapshots are write-once, dedup against the
+  latest capture of the same method/version only within a 24-hour refresh window (so an
+  unchanged posting's freshness can be renewed), gate "complete" on non-empty text (and a screenshot for
   application preflight), and promote an application only from `discovered` to
   `captured`. `job_snapshots` immutability keeps changed/deleted postings archived.
 - `capture.ts` captures through a real browser via an injected page backend: bounded

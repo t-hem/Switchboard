@@ -25,6 +25,9 @@ export function canonicalizeUrl(value: string): string {
 /** Dedup ignores the transport scheme so an http→https redirect does not fork a posting. */
 const dedupKeyFor = (canonical: string): string => canonical.replace(/^http:/, "https:");
 
+/** A recapture of unchanged text within this window reuses the latest snapshot. */
+export const SNAPSHOT_REFRESH_MS = 24 * 60 * 60 * 1000;
+
 export type IngestInput = {
   sourceId?: string | null;
   adapterId: string;
@@ -107,7 +110,13 @@ export class Postings {
     });
   }
 
-  /** Snapshot evidence is write-once. Re-capturing unchanged text does not duplicate it. */
+  /**
+   * Snapshot evidence is write-once. Re-capturing unchanged text shortly after the latest
+   * capture reuses it, but a capture is also an observation *time*: once the latest one is
+   * older than the refresh window, identical text is a new snapshot, so evidence freshness
+   * can be renewed. Only the latest capture is compared, so text that changed and then
+   * changed back is recorded again rather than resolving to the stale original.
+   */
   recordSnapshot(input: SnapshotInput): SnapshotResult {
     if (input.completeness === "complete" && !input.descriptionText.trim()) {
       throw new AppError("incomplete_capture", "A complete snapshot requires captured text");
@@ -118,9 +127,9 @@ export class Postings {
     const contentHash = textDigest(input.descriptionText);
     return transaction(this.db, () => {
       // Dedup within one capture method/version: a manual paste never masks a browser capture.
-      const existing = this.db.prepare("SELECT id,screenshot_hash FROM job_snapshots WHERE job_id=? AND purpose=? AND content_hash=? AND capture_version=?")
-        .get(input.jobId, input.purpose, contentHash, input.captureVersion);
-      if (existing) {
+      const existing = this.db.prepare(`SELECT id,screenshot_hash,content_hash,captured_at FROM job_snapshots WHERE job_id=? AND purpose=? AND capture_version=?
+        ORDER BY captured_at DESC, rowid DESC LIMIT 1`).get(input.jobId, input.purpose, input.captureVersion);
+      if (existing && existing["content_hash"] === contentHash && this.now() - Date.parse(String(existing["captured_at"])) < SNAPSHOT_REFRESH_MS) {
         return { snapshotId: String(existing["id"]), contentHash, screenshotHash: str(existing, "screenshot_hash"), created: false };
       }
       const screenshotHash = input.screenshot ? this.artifacts.put(input.screenshot, input.imageMimeType ?? "image/png", "screenshot", undefined).hash : null;
