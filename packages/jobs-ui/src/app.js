@@ -23,7 +23,7 @@ async function load(){
   $('state').textContent=status.scheduler.reason;
   $('details').textContent=JSON.stringify({dataDirectory:status.dataDirectory,bootstrap:status.bootstrap,capabilities:status.capabilities},null,2);
   $('settings').hidden=false;localStorage.setItem('jobs.token',$('token').value);message('Settings loaded.');
-  await Promise.all([loadDashboard(),loadSources(),loadLibrary(),loadApplications()]);
+  await Promise.all([loadDashboard(),loadSources(),loadLibrary(),loadApplications(),loadSubmissions(),loadPolicies()]);
  }catch(error){message(error.message);}
 }
 $('connect').addEventListener('submit',event=>{event.preventDefault();void load();});
@@ -259,7 +259,67 @@ async function showPackage(applicationId){
   message('Manual completion recorded with the receipt you supplied.');await showPackage(applicationId);await loadDashboard();}));
 
  root.append(button('Reload package',()=>showPackage(applicationId)));
+
+ // Sending: a separate, gated, external action on this exact manifest.
+ const send=add('fieldset');const sendLegend=document.createElement('legend');sendLegend.textContent='Sending';send.append(sendLegend);
+ const attemptState=pkg.attempt?pkg.attempt.state:'none';
+ send.append(document.createTextNode(`Attempt state: ${attemptState}. ${pkg.approval?`Approval ${pkg.approval.current?'matches this manifest':'belongs to an earlier manifest'}.`:'No approval recorded.'}`));
+ if(pkg.attempt){
+  if(pkg.attempt.send_started_at)send.append(document.createTextNode(` Send started ${pkg.attempt.send_started_at}.`));
+  if(pkg.attempt.outcome_json){const outcome=JSON.parse(pkg.attempt.outcome_json);
+   send.append(document.createTextNode(` Recorded outcome: ${outcome.outcome}${outcome.externalId?` (${outcome.externalId})`:''}${outcome.observedBy===`operator`?` — reported by the operator, not observed by the service`:''}.`));}
+  if(pkg.attempt.receipt_hash)send.append(artifactButton('Download the confirmation evidence',pkg.attempt.receipt_hash));
+  if(attemptState==='approved'){
+   send.append(button('Send this application now (external action)',async()=>{
+    if(!window.confirm('Send this exact prepared application to the employer site now?'))return;
+    const result=await request(`/api/attempts/${encodeURIComponent(pkg.attempt.id)}/submit`,{},'POST');
+    message(result.blocked?`Not sent: ${result.blocked.code} — ${result.blocked.detail}`
+     :result.state==='submitted'?`Sent and confirmed${result.externalId?` (${result.externalId})`:''}.`
+     :result.state==='rejected'?'The site rejected this application; nothing else was sent.'
+     :'The send could not be confirmed. Reconcile it below before another attempt.');
+    await showPackage(applicationId);await Promise.all([loadDashboard(),loadSubmissions()]);}));
+  } else if(attemptState==='unknown')send.append(document.createTextNode(' This send is unconfirmed. Record what you found under Submissions; nothing is retried automatically.'));
+  else if(attemptState==='draft')send.append(document.createTextNode(' Approve this exact manifest above before it can be sent.'));
+ }
  message('Review package loaded.');
+}
+async function loadSubmissions(){
+ const data=await request('/api/submissions');const root=$('submissions');root.replaceChildren();
+ if(!data.submissions.length){root.textContent='Nothing has been sent yet.';return;}
+ for(const row of data.submissions){const box=document.createElement('fieldset');const legend=document.createElement('legend');
+  let outcome={};try{outcome=JSON.parse(row.outcome_json??'{}');}catch{}
+  legend.textContent=`${row.company} · ${row.title} · ${row.state}`;box.append(legend);
+  const line=document.createElement('p');line.textContent=`${row.adapter_id} · started ${row.send_started_at??'—'}${row.finished_at?` · finished ${row.finished_at}`:''}${outcome.externalId?` · reference ${outcome.externalId}`:''}${outcome.observedBy===`operator`?' · operator-reported':''}`;box.append(line);
+  if(row.receipt_hash)box.append(artifactButton('Download confirmation evidence',row.receipt_hash));
+  if(row.state==='unknown'){
+   const note=document.createElement('p');note.textContent='Confirm the real outcome from the site or your email. This is recorded as your report, not as something the service observed.';box.append(note);
+   const detail=document.createElement('input');detail.placeholder='What did you find?';detail.maxLength=2000;
+   const reference=document.createElement('input');reference.placeholder='External reference (optional)';reference.maxLength=200;
+   const receipt=document.createElement('textarea');receipt.rows=3;receipt.placeholder='Confirmation text you were shown (optional)';receipt.maxLength=200000;
+   box.append(document.createTextNode('What you found'),detail,document.createTextNode('Reference'),reference,document.createTextNode('Receipt text'),receipt);
+   const actions=document.createElement('div');actions.className='actions';
+   for(const outcome of ['submitted','rejected'])actions.append(button(`Record as ${outcome}`,async()=>{
+    await request(`/api/attempts/${encodeURIComponent(row.id)}/reconcile`,{outcome,detail:detail.value||`Operator reported ${outcome}`,externalId:reference.value||null,receiptText:receipt.value||undefined},'POST');
+    message('Reconciliation recorded. Nothing was resent.');await Promise.all([loadSubmissions(),loadDashboard()]);}));
+   box.append(actions);
+  }
+  root.append(box);}
+}
+async function loadPolicies(){
+ const data=await request('/api/policies');const root=$('policies');root.replaceChildren();
+ const latest=new Map();for(const policy of data.policies)if(!latest.has(policy.scopeKey))latest.set(policy.scopeKey,policy);
+ if(!latest.size){root.textContent='No site policies yet. Preparing an application creates the first revision.';return;}
+ for(const policy of [...latest.values()]){const box=document.createElement('fieldset');const legend=document.createElement('legend');
+  legend.textContent=`${policy.scopeKey} · revision ${policy.revision}`;box.append(legend);
+  box.append(document.createTextNode(`submission ${policy.capabilities.submit?'permitted':'forbidden'} · automatic ${policy.restrictions.autoSubmit?'enabled':'off'}${policy.restrictions.maxPerDay!==undefined?` · max ${policy.restrictions.maxPerDay}/day`:''}`));
+  const actions=document.createElement('div');actions.className='actions';
+  const revise=async(patch,caps,restrictions)=>{
+   const capabilities={...policy.capabilities,...caps||{}};const merged={...policy.restrictions,...restrictions||{}};delete merged.notes;
+   await request('/api/policies',{adapterId:policy.adapterId,siteUrl:policy.siteUrl??'',capabilities,restrictions:merged},'PUT');
+   message(`Policy revision recorded: submission ${capabilities.submit?'permitted':'forbidden'}.`);await loadPolicies();};
+  actions.append(button(policy.capabilities.submit?'Forbid submission':'Permit submission',()=>revise({},policy.capabilities.submit?{submit:false}:{submit:true},policy.capabilities.submit?{autoSubmit:false}:{})));
+  if(policy.capabilities.submit)actions.append(button(policy.restrictions.autoSubmit?'Disable automatic sending':'Allow automatic sending',()=>revise({},{},{autoSubmit:!policy.restrictions.autoSubmit})));
+  box.append(actions);root.append(box);}
 }
 $('prepare-form').onsubmit=async event=>{event.preventDefault();
  const applicationId=$('prepare-application').value;if(!applicationId){message('Choose an application first.');return;}

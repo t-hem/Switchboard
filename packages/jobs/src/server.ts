@@ -13,6 +13,7 @@ import { AppError, SourceError } from "./errors.js";
 import { applicationsRoutes } from "./applications-api.js";
 import type { SupervisedBrowser } from "./browser.js";
 import { schedulerStatus } from "./scheduler.js";
+import { submissionRoutes } from "./submission-api.js";
 import { schedulerRoutes } from "./scheduler-api.js";
 import { screeningRoutes } from "./screening-api.js";
 import { settingsUpdateSchema, type Settings } from "./settings.js";
@@ -49,7 +50,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
   app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
-    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true},
+    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true,submissions:Boolean(config.browserExecutablePath)},
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
@@ -66,6 +67,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   dashboardRoutes(app,store,dir);
   postingsRoutes(app,store,dir,config,{...options.deps,browser:options.browser});
   applicationsRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
+  submissionRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
   schedulerRoutes(app,store,dir,config);

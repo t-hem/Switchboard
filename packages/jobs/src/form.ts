@@ -148,13 +148,14 @@ export class PuppeteerFormSession implements FormSession {
     await page.waitForNetworkIdle({ idleTime: 600, timeout: Math.min(this.options.timeoutMs ?? 20_000, 15_000) }).catch(() => undefined);
     const found = await page.evaluate((selectors: { confirmation: string; reference: string }) => {
       const g = globalThis as unknown as FormGlobals;
-      const read = (selector: string): string | null => {
-        const element = g.document.querySelector(selector) as unknown as { textContent: string | null } | null;
-        return element?.textContent?.trim() ?? null;
+      const read = (selector: string): { text: string | null; result: string | null } => {
+        const element = g.document.querySelector(selector) as unknown as { textContent: string | null; getAttribute(name: string): string | null } | null;
+        return { text: element?.textContent?.trim() ?? null, result: element?.getAttribute("data-apply-result") ?? null };
       };
-      return { confirmationText: read(selectors.confirmation), externalId: read(selectors.reference) };
+      const confirmation = read(selectors.confirmation);
+      return { confirmationText: confirmation.text, result: confirmation.result, externalId: read(selectors.reference).text };
     }, { confirmation: CONFIRMATION_SELECTOR, reference: REFERENCE_SELECTOR });
-    return { finalUrl: page.url(), confirmationText: found.confirmationText, externalId: found.externalId };
+    return { finalUrl: page.url(), confirmationText: found.confirmationText, externalId: found.externalId, result: found.result };
   }
 
   /** Evidence for whatever happened on the page, used as the submission receipt. */

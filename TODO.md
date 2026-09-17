@@ -16,7 +16,12 @@ discovery scheduling with paginated checkpoints and explainable, non-converting 
 browser with verifiable crash cleanup and real form filling against a fixture site
 (`acceptance/forms.mjs`), preparation/review/approve/resolve/manual-completion routes with
 automatic invalidation of a stale approval, and the `jobs-ui` review screen
-(`acceptance/review.mjs`). Nothing submits. Step 10 (controlled submission) is next.
+(`acceptance/review.mjs`). Step 10 added controlled submission: the adapter `submit` contract, audited per-site
+policy revisions, every gate and the evidence rechecked at send time, an atomically claimed
+intent (double clicks and two workers cannot both send), receipts stored as evidence,
+`unknown` for unconfirmable sends with explicit operator reconciliation, and a startup sweep
+that turns an interrupted send into `unknown` rather than a retry. Step 11 (records,
+export, operating recovery) is next.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.

@@ -132,6 +132,11 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   `applications.ts`/`applications-api.ts` (manifest-hash approval, automatic invalidation
   of a stale approval, review package with `changesSinceReview`, handoff resolution,
   manual-completion receipts). `acceptance/forms.mjs` covers it with real Chromium.
+- **Step 10** (verified, on branch `step10-submission`): `policies.ts` (audited per-site
+  revisions: permit/forbid submission, automatic opt-in, daily cap), `submission.ts` (all
+  gates and evidence rechecked at send time, atomic intent claim, receipts as artifacts,
+  `unknown` + inbox reconciliation, startup sweep for interrupted sends), the submit and
+  reconcile routes, and UI controls for sending, reconciliation and site policy.
 - **Step 9c** (verified, on branch `step9-application-prep`): the `jobs-ui` review screen
   (preparation form plus package view: posting text/screenshot/source link, selected resume
   with agent run, answer set, filled fields and uploads, changes since review, approval,
@@ -222,7 +227,7 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 10 — controlled submission and duplicate prevention
+## Next: step 11 — essential records, export and operating recovery
 
 Step 9 is **complete and verified** on branch `step9-application-prep`: the supervised
 browser with verifiable crash cleanup, real form filling and upload against a fixture site
@@ -232,12 +237,19 @@ and the `jobs-ui` review screen (`acceptance/review.mjs`, including a real-brows
 the served screen). Nothing in step 9 submits an application — there is deliberately no
 submission route yet.
 
-Step 10 must add the send path behind evidence/review/site policy: serialise competing
-attempts per job, recheck enabled/pause, review hash or automatic policy, caps and complete
-artifacts immediately before sending, record receipts and confirmation evidence, support
-truthful manual reconciliation of unknown outcomes, and prove at most one fixture
-submission without explicit reconciliation. The fixture form site already has a `/submit`
-endpoint that the acceptance counts, so the fixture is ready for it.
+Step 10 is **complete and verified** on branch `step10-submission`: the adapter `submit`
+contract, per-site policy revisions (permit/forbid/automatic), every gate rechecked at send
+time, an atomically claimed intent so double clicks and two workers cannot both send,
+receipts stored as evidence, `unknown` for unconfirmable sends with explicit operator
+reconciliation, and a startup sweep that turns an interrupted send into `unknown` rather
+than a retry. `acceptance/submission.mjs` proves the cases end to end against a real
+browser and a counting loopback site. See the plan's step 10 log entry for detail.
+
+Step 11 (records, export, operating recovery) is next; it must deliver per-application and
+per-run detail with all existing evidence, decision history, resume downloads and outcome,
+plus consistent backup/restore/export, storage health and queue repair controls, retaining
+submitted evidence and failed/rejected drafts by default with no silent age-based
+pruning.
 
 Step 9 in one place:
 

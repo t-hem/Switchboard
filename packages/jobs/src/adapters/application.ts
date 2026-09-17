@@ -18,7 +18,7 @@ export type PreparedForm = { filled: { field: string; value: string }[]; uploads
 /** What the page actually shows after filling: evidence, not the values the adapter intended. */
 export type UploadedFile = { field: string; fileName: string; sizeBytes: number };
 export type ObservedForm = { finalUrl: string; filled: { field: string; value: string }[]; uploads: UploadedFile[] };
-export type SubmitConfirmation = { finalUrl: string; confirmationText: string | null; externalId: string | null };
+export type SubmitConfirmation = { finalUrl: string; confirmationText: string | null; externalId: string | null; /** The site's own verdict, if it states one. */ result: string | null };
 /**
  * The result of a send. `unknown` is the honest answer when the site's response cannot be
  * read reliably: never report success from an assumption. A pre-send failure throws.
@@ -169,7 +169,10 @@ export class FixtureFormAdapter implements ApplicationAdapter {
     const text = confirmation.confirmationText?.trim() ?? null;
     // No readable confirmation is not a success: it is an unknown the operator must resolve.
     if (!text && !confirmation.externalId) return { outcome: "unknown", confirmationText: null, confirmationImage: image, detail: "The site showed no readable confirmation of the send" };
-    return { outcome: "submitted", confirmationText: text, confirmationImage: image, externalId: confirmation.externalId };
+    // A site that says it rejected the application is believed.
+    const rejected = confirmation.result?.toLowerCase() === "rejected";
+    return { outcome: rejected ? "rejected" : "submitted", confirmationText: text, confirmationImage: image, externalId: confirmation.externalId,
+      detail: rejected ? "The site reported the submission was rejected" : undefined };
   }
 }
 function requireSession(context: ApplicationContext): FormSession {

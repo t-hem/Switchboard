@@ -45,6 +45,12 @@
 <label for="prepare-answers">Answers JSON</label><textarea id="prepare-answers" rows="6" spellcheck="false" placeholder='{"name":"Ada Lovelace","email":"ada@example.com"}'></textarea>
 <div class="actions"><button id="prepare-submit">Prepare application</button><span id="prepare-note"></span></div></form>
 <div id="package"></div>
+<h2>Submissions</h2>
+<p>Sending is a separate, gated action on one approved manifest. An unconfirmed send is never shown as a success; it waits here until you record what you actually found.</p>
+<div id="submissions"></div>
+<h2>Site policies</h2>
+<p>Permitting or forbidding submission for a site is an explicit, audited act that immediately governs an already approved attempt. Automatic sending needs its own opt-in.</p>
+<div id="policies"></div>
 <h2>Recent decisions</h2><div id="decisions"></div>
 <section id="record" hidden tabindex="-1"><h2 id="record-title"></h2><div id="record-links" class="actions"></div><pre id="record-data"></pre>
 <form id="decision" hidden><label>Reason or requested changes<textarea id="reason" rows="3" maxlength="10000"></textarea></label>

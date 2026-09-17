@@ -52,7 +52,10 @@ try{
  // The adapter registry is a contract, and it never claims submission here.
  const adapters=(await api(base,'/api/application-adapters')).body;
  assert.deepEqual(adapters.adapters.map(a=>a.id).sort(),['fixture','fixture-form','manual']);
- assert.equal(adapters.adapters.find(a=>a.id==='fixture-form').capabilities.submit,false);
+ // The browser adapter can send, but only through the submission gates in step 10;
+ // the in-process fixture and the manual handoff never send at all.
+ assert.equal(adapters.adapters.find(a=>a.id==='fixture-form').capabilities.submit,true);
+ for(const id of ['fixture','manual'])assert.equal(adapters.adapters.find(a=>a.id===id).capabilities.submit,false,`${id} never sends`);
  assert.equal(adapters.browser.available,false,'no browser is configured in this run');
 
  // Prepare, review, approve against the exact manifest.
@@ -102,15 +105,19 @@ try{
  assert.ok(manualAttempt.receipt_hash,'the receipt is stored as evidence');
  assert.equal((await api(base,`/api/applications/${applicationId}/manual-completion`,{detail:'Submitted on the employer site',receiptText:'Reference ABC-123'})).body.created,false);
 
- // Nothing is sent without an explicit operator action; a submission route does not exist yet.
+ // Sending is a separate, gated route on a specific attempt, not an application action.
  const noSubmit=await api(base,`/api/applications/${applicationId}/submit`,{});
- assert.equal(noSubmit.status,404,'the service exposes no submission route in this step');
+ assert.equal(noSubmit.status,404,'there is no application-level submission route');
+ const attemptSubmit=await api(base,`/api/attempts/${attemptId}/submit`,{});
+ assert.equal(attemptSubmit.status,409,'without a configured browser the send is refused, never faked');
+ assert.equal(attemptSubmit.body.error.code,'browser_unavailable');
 
  // The served client ships the review screen.
  const page=await (await fetch(`${base}/`)).text();
  assert.ok(page.includes('Application preparation'),'the UI ships the preparation section');
  const script=await (await fetch(`${base}/app.js`)).text();
- for(const marker of ['showPackage','manual-completion','expectedManifestHash'])assert.ok(script.includes(marker),`app.js ships ${marker}`);
+ for(const marker of ['showPackage','manual-completion','expectedManifestHash','loadSubmissions','/reconcile','loadPolicies'])assert.ok(script.includes(marker),`app.js ships ${marker}`);
+ assert.ok(page.includes('Site policies')&&page.includes('Submissions'),'the UI ships the submission and policy sections');
 
  // With a browser available, prove the screen actually works: it connects, fills the
  // application list and offers the preparation controls without a script error.

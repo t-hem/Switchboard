@@ -1439,6 +1439,42 @@ Approved to proceed; see implementation entries below.
   form server acceptance, and manual-completion receipts. Those are 9b. Nothing in 9a
   transmits or submits anything.
 
+### 2026-09-16 — step 10 complete
+
+Step 10 adds the send path, built so nothing is reported that was not observed.
+
+- `adapters/application.ts` gains `submit`; capabilities are honest — `manual` and the
+  in-process fixture never send, `fixture-form` re-fills the live form and presses the
+  site's real submit control (the only code path allowed to). `form.ts` reads whatever
+  confirmation the site actually rendered, including its own verdict (`data-apply-result`),
+  and captures the screenshot used as receipt evidence.
+- `submission.ts` rechecks every gate at send time: enabled, paused, mode, adapter
+  capability, the *effective* site policy revision, the approval hash, that no newer
+  attempt exists, that no other attempt is in flight, the daily cap, and complete, fresh,
+  verifiable evidence. The intent is committed with a conditional UPDATE before anything
+  leaves the machine, so a double click or two workers cannot both send. The recorded
+  outcome is the site's — submitted, rejected, or `unknown`, which opens an inbox item for
+  explicit reconciliation. A crash after the intent becomes `unknown` at the next start
+  (never a silent retry); reconciliation demands an explicit operator outcome and is
+  labelled operator-observed, never machine-observed. `policies.ts` makes permitting,
+  forbidding and enabling automatic sending explicit, audited revisions, so tightening a
+  site immediately governs an already approved attempt.
+- `submission-api.ts` adds `POST /api/attempts/:id/submit`, `POST
+  /api/attempts/:id/reconcile`, `GET /api/submissions` and `GET|PUT /api/policies`;
+  `/api/status` reports `submissions`. The UI gains a Sending section in the package view,
+  a Submissions list with reconciliation for unknown outcomes, and site-policy controls.
+- `acceptance/submission.mjs` (real Chromium, loopback site that counts submissions):
+  an unapproved attempt is never sent; an approved one sends exactly once and re-fills the
+  live form with the saved answers and the exact resume bytes; a double click cannot send
+  twice; tightening the policy blocks a newly approved send; draft-only mode sends nothing;
+  a page that shows no confirmation is recorded `unknown` while the site did receive it and
+  reconciliation never resends; an in-process adapter is refused; a rejecting site is
+  recorded as a rejection.
+
+Verified: jobs typecheck, 111 jobs tests (10 new for the gates, single-flight, unknown and
+crash-sweep paths), and `scaffold`, `scheduling`, `review`, `forms`, `submission`,
+`personas`, `library` and `capture` acceptances all pass.
+
 ### 2026-09-16 — step 9 complete
 
 Step 9c adds the review screen in `jobs-ui`: a preparation form (application, adapter,

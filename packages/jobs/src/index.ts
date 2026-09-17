@@ -10,6 +10,8 @@ import { TaskQueue } from "./queue.js";
 import { FetchHttpClient } from "./net.js";
 import { DiscoveryScheduler } from "./scheduler.js";
 import { SupervisedBrowser, browserPaths } from "./browser.js";
+import { PuppeteerFormSession } from "./form.js";
+import { SubmissionService } from "./submission.js";
 
 async function main(): Promise<void> {
   assertRuntime();
@@ -31,6 +33,12 @@ async function main(): Promise<void> {
     ? new SupervisedBrowser({ executablePath: config.browserExecutablePath, ...browserPaths(dir) })
     : undefined;
   if (browser) { const reaped = await browser.reapStale(); if (reaped !== "no_record" && reaped !== "already_gone") console.log(`Supervised browser cleanup: ${reaped}`); }
+  // An attempt that was mid-send when the service stopped is unknown, never retried silently.
+  const submission=new SubmissionService({store,db:store.db,artifacts,
+    http:new FetchHttpClient({allowPrivate:config.allowPrivateImport===true}),
+    createSession: browser ? () => new PuppeteerFormSession(browser) : undefined});
+  const swept=submission.sweepStale();
+  if(swept.swept)console.log(`Unconfirmed submissions now await reconciliation: ${swept.swept}`);
   const app=buildServer(config,store,dir,{browser});
   try { await app.listen({host:"127.0.0.1",port:config.port}); }
   catch(error) { scheduler.stop(); await app.close(); throw error; }

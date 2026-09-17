@@ -27,6 +27,8 @@ class FakeSession implements FormSession {
       uploads: this.uploads.map(([field]) => ({ field, fileName: "resume-1.txt", sizeBytes: 11 })) };
   }
   async clickPreview(): Promise<boolean> { this.previews++; return this.options.preview !== false; }
+  async submitForm() { return { finalUrl: "u", confirmationText: "Submitted", externalId: "REF-1", result: "submitted" }; }
+  async screenshot() { return new Uint8Array([1, 2, 3]); }
   async close(): Promise<void> { this.closed = true; }
 }
 

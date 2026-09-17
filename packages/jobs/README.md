@@ -208,7 +208,14 @@ non-submitting preview control. Routes: `GET /api/application-adapters`,
 `POST /api/applications/:id/prepare`, `GET /api/applications/:id/package`,
 `POST /api/applications/:id/resolve`, `POST /api/applications/:id/manual-completion`,
 `POST /api/attempts/:id/approve`. Approving binds to one attempt's manifest hash;
-preparing different evidence or answers cancels the prior approval. The `jobs-ui` review screen (`Application preparation`) prepares, shows the package
+preparing different evidence or answers cancels the prior approval. Sending is a separate, gated action: `POST /api/attempts/:id/submit` rechecks every gate
+and the *effective* site policy revision at that moment, claims the intent atomically, and
+records the site's own outcome (submitted, rejected or `unknown`). An unconfirmable send
+becomes `unknown` with an inbox item; `POST /api/attempts/:id/reconcile` records the
+operator's explicit outcome and never resends. `GET|PUT /api/policies` manages audited
+per-site revisions (permit/forbid submission, automatic opt-in, daily cap).
+
+The `jobs-ui` review screen (`Application preparation`) prepares, shows the package
 (posting text, screenshot, source link, selected resume and its agent run, the answer set,
 filled fields and uploads, what changed since the last review), approves one exact
 manifest, resolves a handoff and records a manual completion. Nothing here transmits a
@@ -219,6 +226,7 @@ npm run jobs:build
 node packages/jobs-ui/build.mjs            # the service serves packages/jobs-ui/dist
 node packages/jobs/acceptance/review.mjs   # routes, plus the screen with JOBS_BROWSER_EXECUTABLE
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/forms.mjs
+JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/submission.mjs
 ```
 
 ```sh
