@@ -14,6 +14,8 @@ import { applicationsRoutes } from "./applications-api.js";
 import type { SupervisedBrowser } from "./browser.js";
 import { schedulerStatus } from "./scheduler.js";
 import { submissionRoutes } from "./submission-api.js";
+import { recordsRoutes } from "./records-api.js";
+import { isReadOnly } from "./health.js";
 import { schedulerRoutes } from "./scheduler-api.js";
 import { screeningRoutes } from "./screening-api.js";
 import { settingsUpdateSchema, type Settings } from "./settings.js";
@@ -36,6 +38,9 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     }
     if(req.method==="OPTIONS")return reply.code(204).send();
     if (!req.url.startsWith("/api/")) return;
+    // A restored archive is inspectable but never dispatches: every write is refused.
+    if (isReadOnly(dir) && (req.method === "POST" || req.method === "PUT"))
+      throw new AppError("read_only_archive", "This data directory is a read-only restore; no work is dispatched from it", 409);
     const provided = Buffer.from(req.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${config.token}`);
     if (provided.length!==expected.length || !timingSafeEqual(provided,expected)) throw new AppError("unauthorized","A valid jobs service token is required",401);
@@ -50,7 +55,8 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
   app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
-    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true,submissions:Boolean(config.browserExecutablePath)},
+    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true,submissions:Boolean(config.browserExecutablePath),records:true},
+    readOnly:isReadOnly(dir),
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
@@ -68,6 +74,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   postingsRoutes(app,store,dir,config,{...options.deps,browser:options.browser});
   applicationsRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
   submissionRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
+  recordsRoutes(app,store,dir,{now:options.deps?.now});
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
   schedulerRoutes(app,store,dir,config);
