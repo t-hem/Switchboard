@@ -23,7 +23,7 @@ class FakeSpawner implements AgentSpawner {
   readonly created: SpawnerCreateRequest[] = [];
   readonly stopped: string[] = [];
   private readonly sessions = new Map<string, SpawnerSession>();
-  /** Test hook: run before inspect returns, to stage cancellation mid-run. */
+  /** Test hook: run before inspect returns, to stage cancellation or a host restart mid-run. */
   onInspect?: (id: string) => void;
   finish(id: string, exitCode = 0): void { const session = this.sessions.get(id); if (session) this.sessions.set(id, { ...session, state: "exited", exitCode }); }
   constructor(private readonly behaviour: (request: SpawnerCreateRequest, index: number) => Behaviour | Promise<Behaviour>) {}
@@ -251,6 +251,33 @@ test("the edit pass can only change bullet prose through declared edits", async 
     assert.equal(edit!.state, "failed", scenario.name);
     assert.match(edit!.error ?? "", scenario.error, scenario.name);
   }
+});
+
+test("a spawner restart while the agent runs is waited out, not reported as a failed run", async (t) => {
+  const { store, runner, spawner, profile, template, snapshotId, bullets } = fixture(t, () => ({ state: "running",
+    result: { structured: structured(snapshotId, profile.id, template.id, [bullets[0]!.prose]),
+      selectedBullets: [{ bulletId: bullets[0]!.bulletId, revisionId: bullets[0]!.id, prose: bullets[0]!.prose, tags: [], matched: [], score: 0 }] } }));
+  let calls = 0;
+  spawner.onInspect = id => {
+    calls++;
+    if (calls <= 3) throw new Error("connect ECONNREFUSED 127.0.0.1:7777");
+    spawner.finish(id);
+  };
+  const outcome = await runner.runStage({ stage: "assemble", applicationId: "app-10", jobSnapshotId: snapshotId,
+    profileRevisionId: profile.id, templateRevisionId: template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  assert.equal(outcome.state, "waiting_review", outcome.error);
+  assert.deepEqual(spawner.stopped, [], "a live agent is never stopped because the host was briefly unreachable");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM events WHERE kind='run.spawner_unreachable'").get()!.n, 1);
+});
+
+test("a failure while the agent may still be running stops it", async (t) => {
+  const { runner, spawner, profile, template, snapshotId } = fixture(t, () => ({ state: "running", write: false }));
+  spawner.onInspect = () => { throw new Error("host unreachable"); };
+  const outcome = await runner.runStage({ stage: "assemble", applicationId: "app-11", jobSnapshotId: snapshotId,
+    profileRevisionId: profile.id, templateRevisionId: template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  assert.equal(outcome.state, "failed");
+  assert.match(outcome.error ?? "", /spawner was unreachable/);
+  assert.ok(spawner.stopped.includes("sess-1"), "a stop is requested rather than abandoning the agent");
 });
 
 test("a hung run is stopped at its deadline instead of waiting forever", async (t) => {

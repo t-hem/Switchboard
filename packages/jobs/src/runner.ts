@@ -75,6 +75,8 @@ export class TailoringRunner {
     const taskFilePath = path.join(runDirectory, "task.md");
     const resultPath = path.join(runDirectory, "result.json");
 
+    let session: { id: string; state: "running" | "exited"; exitCode?: number | null } | undefined;
+    let exited = false;
     try {
       const taskText = this.composeTask(input, resultPath);
       const snapshot = snapshotPersona(personasDir, input.personaId, taskText);
@@ -91,7 +93,6 @@ export class TailoringRunner {
       const invocationPlan = invocation.build({ taskFilePath, resultPath, model: snapshot.persona.model, tools: snapshot.persona.tools });
       const label = `jobs:${input.applicationId}:tailor:${input.stage}:${runId}`;
       const idempotencyKey = `jobs:${task.id}:${input.stage}`;
-      let session;
       try {
         session = await control.create({ agent: snapshot.persona.agent, cwd: runDirectory, label, extraArgs: invocationPlan.argv, idempotencyKey });
       } catch (error) {
@@ -105,6 +106,7 @@ export class TailoringRunner {
       db.prepare("UPDATE agent_runs SET state='running',spawner_session_id=? WHERE id=?").run(session.id, runId);
 
       const finished = await this.awaitExit(session, runId, control);
+      exited = true;
       if (finished.exitCode !== undefined && finished.exitCode !== null && finished.exitCode !== 0) {
         throw new AppError("agent_exit", `Agent exited with code ${finished.exitCode}`);
       }
@@ -140,6 +142,9 @@ export class TailoringRunner {
         resumeVersionId: persisted.resumeVersionId, textArtifactHash: persisted.textArtifactHash, text: persisted.text };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // A failure while the agent may still be running must not leave it running untracked.
+      // An exited session is kept: its retained output is evidence for the operator.
+      if (session && !exited) await control.stop(session.id).catch(() => undefined);
       db.prepare("UPDATE agent_runs SET state='lost',finished_at=?,outcome_json=? WHERE id=? AND state!='exited'")
         .run(new Date(this.now()).toISOString(), JSON.stringify({ error: message }), runId);
       db.prepare("UPDATE tasks SET state='failed',error_json=?,updated_at=? WHERE id=?").run(JSON.stringify({ code: "run_failed", message }), new Date(this.now()).toISOString(), task.id);
@@ -174,13 +179,24 @@ export class TailoringRunner {
     const pollMs = this.deps.pollMs ?? 500, timeoutMs = this.deps.timeoutMs ?? 20 * 60_000, deadline = this.now() + timeoutMs;
     const sessionId = session.id;
     let state = session.state, exitCode: number | null | undefined = session.exitCode;
+    let unreachable = 0;
     while (state !== "exited") {
       if (this.now() >= deadline) {
         await control.stop(sessionId).catch(() => undefined);
-        throw new AppError("agent_timeout", "Agent run exceeded its deadline and was stopped");
+        throw new AppError("agent_timeout", unreachable
+          ? "Agent run exceeded its deadline while the spawner was unreachable; a stop was requested"
+          : "Agent run exceeded its deadline and was stopped");
       }
       await this.sleep(pollMs);
-      const inspected = await this.deps.spawner.inspect(sessionId);
+      let inspected;
+      try { inspected = await this.deps.spawner.inspect(sessionId); }
+      catch {
+        // The host restarting (which keeps persistent sessions) is not the agent failing:
+        // keep polling until the deadline instead of abandoning a live run.
+        if (unreachable++ === 0) event(this.deps.db, "run.spawner_unreachable", "agent_run", runId, { sessionId }, this.now());
+        continue;
+      }
+      unreachable = 0;
       if (!inspected) { this.deps.db.prepare("UPDATE agent_runs SET state='lost' WHERE id=?").run(runId); throw new AppError("agent_lost", "Agent session disappeared before completing"); }
       state = inspected.state; exitCode = inspected.exitCode;
     }
