@@ -7,6 +7,7 @@ import type { ArtifactStore } from "./artifacts.js";
 import type { Postings } from "./postings.js";
 import type { Sources } from "./sources.js";
 import { createSourceAdapter } from "./adapters/source.js";
+import { Screening } from "./screening.js";
 import type { HttpClient } from "./net.js";
 import { withRetries } from "./net.js";
 
@@ -24,8 +25,11 @@ export type DiscoveryOutcome = {
  * partial or failed scan is recorded as such and never closes postings.
  */
 export class Discovery {
+  readonly screening: Screening;
   constructor(readonly db: DatabaseSync, readonly sources: Sources, readonly postings: Postings,
-    readonly artifacts: ArtifactStore, readonly http: HttpClient, readonly now: () => number = Date.now) {}
+    readonly artifacts: ArtifactStore, readonly http: HttpClient, readonly now: () => number = Date.now) {
+    this.screening = new Screening(db, now);
+  }
 
   /** The resume point left by the source's last blocked/partial run, if any. */
   resumeCheckpoint(sourceId: string): unknown | null {
@@ -73,7 +77,15 @@ export class Discovery {
             postedAt: posting.postedAt ?? null, provenance: "source", rawHash: responseHashes[responseHashes.length - 1] ?? null,
           });
           discovered++;
-          if (ingested.created) created++;
+          if (ingested.created) {
+            created++;
+            // Explainable screening runs only when the source configures filters.
+            const filters = source.config.filters;
+            if (filters && ((filters.keywords?.length ?? 0) || (filters.locations?.length ?? 0) || filters.remote === true)) {
+              const result = this.screening.evaluate({ title: posting.title, descriptionText: posting.descriptionText, location: posting.location ?? null, filters });
+              this.screening.record({ jobId: ingested.jobId, sourceId: source.id, settingsRevision: options.settingsRevision, actor: "filter", ...result });
+            }
+          }
         }
         checkpoint = result.checkpoint ?? null;
         // Persist progress before the next page: a crash mid-scan must not restart it.

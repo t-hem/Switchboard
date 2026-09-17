@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { defaultSettings } from "./settings.js";
 import { workflowSchema, immutableTables } from "./schema.js";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 export function transaction<T>(db:DatabaseSync, action:()=>T): T {
   db.exec("BEGIN IMMEDIATE");
   try {const result=action();db.exec("COMMIT");return result;}
@@ -54,6 +54,20 @@ export function openDatabase(file:string): DatabaseSync {
           BEGIN SELECT RAISE(ABORT,'immutable review input'); END;
         CREATE TRIGGER attention_no_delete BEFORE DELETE ON attention_items BEGIN SELECT RAISE(ABORT,'retain review history'); END;
         PRAGMA user_version=3;`);
+        current=3;
+      }
+      if(current===3){
+        db.exec(`CREATE TABLE screening_decisions (
+          id TEXT PRIMARY KEY NOT NULL, job_id TEXT NOT NULL REFERENCES jobs(id),
+          source_id TEXT REFERENCES sources(id), settings_revision INTEGER NOT NULL REFERENCES settings_revisions(revision),
+          decision TEXT NOT NULL CHECK(decision IN('eligible','excluded','needs_review','skipped')),
+          score REAL NOT NULL, reasons_json TEXT NOT NULL CHECK(json_valid(reasons_json)),
+          actor TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX screening_job ON screening_decisions(job_id,created_at);
+        CREATE TRIGGER screening_immutable BEFORE UPDATE ON screening_decisions BEGIN SELECT RAISE(ABORT,'immutable screening decision'); END;
+        CREATE TRIGGER screening_no_delete BEFORE DELETE ON screening_decisions BEGIN SELECT RAISE(ABORT,'retain screening history'); END;
+        PRAGMA user_version=4;`);
       }
     });
     db.exec("PRAGMA journal_mode=WAL;");

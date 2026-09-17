@@ -58,8 +58,20 @@ async function loadDashboard(){
  list('applications',data.applications,r=>`${r.title} · ${r.company} · ${r.state}${r.block_reason?` · ${r.block_reason}`:''}`,r=>`/api/applications/${encodeURIComponent(r.id)}`);
  list('decisions',data.decisions,r=>`${r.decision} · ${r.subject_type} · ${r.reason??''}`,r=>r.attention_id?`/api/reviews/${encodeURIComponent(r.attention_id)}`:null);
  list('runs',data.searchRuns??[],r=>`${r.source_key} · ${r.adapter_id} · ${r.state}${r.error_json?` · ${JSON.parse(r.error_json).code??''}`:''}`,()=>null);
+ screeningList(data.screening??[]);
  fillSelect('render-snapshot',(data.snapshots??[]).map(s=>({value:s.id,label:`${s.company} · ${s.title} · ${s.completeness}`})));
  $('dashboard').hidden=false;
+}
+function screeningList(rows){
+ const root=$('screening');root.replaceChildren();
+ if(!rows.length){root.textContent='No screening decisions yet.';return;}
+ for(const row of rows){const line=document.createElement('p');line.className='record-row';
+  const reasons=(JSON.parse(row.reasons_json??'[]')).map(reason=>reason.code).join(', ');
+  const jobId=encodeURIComponent(row.job_id);
+  line.append(document.createTextNode(`${row.title} · ${row.company} · ${row.decision} · ${reasons} `));
+  line.append(button('Skip',async()=>{const reason=window.prompt('Reason for skipping this posting?');if(!reason)return;await request(`/api/jobs/${jobId}/skip`,{reason},'POST');message('Skipped.');await loadDashboard();}));
+  line.append(button('Requeue',async()=>{await request(`/api/jobs/${jobId}/requeue`,{},'POST');message('Requeued.');await loadDashboard();}));
+  root.append(line);}
 }
 function fillSelect(id,options){const select=$(id);const previous=select.value;select.replaceChildren(...options.map(option=>{const element=document.createElement('option');element.value=option.value;element.textContent=option.label;return element;}));if(options.some(option=>option.value===previous))select.value=previous;}
 async function loadLibrary(){

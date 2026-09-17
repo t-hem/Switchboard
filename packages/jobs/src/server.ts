@@ -12,6 +12,7 @@ import type { ServiceConfig } from "./config.js";
 import { AppError, SourceError } from "./errors.js";
 import { schedulerStatus } from "./scheduler.js";
 import { schedulerRoutes } from "./scheduler-api.js";
+import { screeningRoutes } from "./screening-api.js";
 import { settingsUpdateSchema, type Settings } from "./settings.js";
 import type { SettingsStore } from "./store.js";
 
@@ -46,7 +47,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
   app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
-    capabilities:{settings:true,import:true,discovery:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:false},
+    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:false},
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
@@ -65,6 +66,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
   schedulerRoutes(app,store,dir,config);
+  screeningRoutes(app,store);
   runnerRoutes(app,store,dir,config);
   for (const [route,name,type] of [["/","index.html","text/html"],["/app.js","app.js","text/javascript"],["/style.css","style.css","text/css"]] as const) {
     app.get(route,async(_req,reply)=>{

@@ -88,11 +88,12 @@ test("dashboard APIs authenticate, validate decisions and download inert verifie
 test("shipped schema 2 upgrades with existing settings and tasks intact",t=>{
   const {dir,store}=fixture(t);const saved=store.current();store.close();
   const db=new DatabaseSync(path.join(dir,"jobs.sqlite"));
-  db.exec("DROP TABLE attention_items; PRAGMA user_version=2");db.close();
+  // A genuine schema-2 database predates both later tables.
+  db.exec("DROP TABLE attention_items; DROP TABLE screening_decisions; PRAGMA user_version=2");db.close();
   const upgraded=new SettingsStore(path.join(dir,"jobs.sqlite"));
   try{
     assert.deepEqual(upgraded.current(),saved);
-    assert.equal(upgraded.db.prepare("PRAGMA user_version").get()!["user_version"],3);
+    assert.equal(upgraded.db.prepare("PRAGMA user_version").get()!["user_version"],4);
     assert.equal(upgraded.db.prepare("SELECT id FROM tasks").get()!["id"],"task");
     assert.equal(upgraded.db.prepare("SELECT count(*) AS n FROM attention_items").get()!["n"],0);
   }finally{upgraded.close();}

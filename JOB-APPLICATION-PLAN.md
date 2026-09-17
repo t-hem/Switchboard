@@ -1366,3 +1366,38 @@ Approved to proceed; see implementation entries below.
   check with the worker running.
 - Not in 8a: scored filtering, unknown-vs-mismatch, salary normalization, screening
   decisions and inspect/skip/requeue (8b); notifications deliberately deferred.
+
+### 2026-09-16 — step 8 complete (explainable screening)
+
+- Schema 4 adds append-only `screening_decisions` (job, source, settings revision,
+  decision, score, reasons, actor, time) with immutable/delete triggers. Migrations
+  v3→v4 are transactional; DATABASE.md regenerated.
+- `filtering.ts` is deterministic and never invents a value:
+  - `normalizeLocation` treats empty/"N/A"/"unknown" as **unknown**, not as a value.
+  - `normalizeSalary` parses currency + amounts + period, and **never converts
+    currency**: two currencies, no currency, or no plausible amount yields `known:false`
+    with the raw text preserved. `extractSalaryText` pulls a phrase from posting text.
+  - `classifyFamily` maps technical roles to the researched families and returns `null`
+    for non-technical or ambiguous titles.
+  - `screenJob` scores and explains: a satisfied filter matches (with the matched terms),
+    a definite mismatch **excludes**, and a field the posting does not state is
+    `needs_review`. Exclusion wins over an unrelated unknown, so a real mismatch is not
+    hidden as ambiguous.
+- `screening.ts` records every decision as an audit event, drives the application state
+  (`eligible`→screened, `excluded`/`skipped`→skipped, `needs_review`→block reason), and
+  never reverts an approved/submitted application. Operator `skip` (requires a reason)
+  and `requeue` are recorded decisions with `actor='operator'`. Re-screening a job with no
+  captured text is honestly `needs_review`.
+- Discovery screens each newly ingested posting against the source's `filters`, so the
+  reason is captured while the text is available. `GET /api/screening` lists decisions and
+  counts; `POST /api/jobs/:id/skip|requeue|screen` perform the operator actions. The
+  dashboard and standalone client show the decisions with reasons and skip/requeue.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 82 jobs tests (5 new filtering
+  and screening tests, plus the schema-2 upgrade fixture updated for schema 4); root
+  typecheck; `DATABASE.md` regenerated. `scheduling.mjs` now also covers eligible/excluded
+  decisions, reason recording and audited skip/requeue. `scaffold`, `library`, `capture`
+  and `dashboard` (dashboard + ui/claim/agent-sync) all pass.
+- Notifications remain **optional and deferred** (the durable inbox/attention counts are
+  the required part and already exist): no ntfy transport, no digest cursor, no external
+  messages. Automatic tailoring currently starts from the operator, not the queue; wiring
+  queue-capacity-aware auto-tailoring belongs with the step-9/10 workflow.

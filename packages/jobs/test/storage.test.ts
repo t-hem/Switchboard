@@ -28,7 +28,7 @@ function legacy(file:string,conflict=false) {
 }
 test('schema upgrades preserve shipped settings; failed migration rolls back all DDL', t => {
   const {root,store}=fixture(t);
-  assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version,3);
+  assert.equal(store.db.prepare("PRAGMA user_version").get()!.user_version,4);
   const old=path.join(root,'old.sqlite');legacy(old);
   const upgraded=new SettingsStore(old);
   assert.equal(upgraded.current().updatedAt,'original');

@@ -14,9 +14,10 @@ to directly.
 - Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
   **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6),
   **`step7a-personas-tools`** (step 7a), **`step7b-tailoring-runner`** (step 7b) and
-  **`step7c-provider-registry`** (adapter swappability) and
-  **`step7c-spawner-recovery`** (host idempotency), each stacked on the previous. All
-  push to `origin`.
+  **`step7c-provider-registry`** (adapter swappability), **`step7c-spawner-recovery`**
+  (host idempotency, carries the merged master display fixes) and
+  **`step8-search-filtering`** (scheduling + screening), each stacked on the previous.
+  All push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -70,7 +71,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–7c
+## Jobs stages 2–8
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -113,6 +114,11 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   triggers the two passes; `GET /api/runs/:id` reads one run; both need a private
   `spawnerToken` in `service.json`. Fake-agent tests cover valid, malformed, missing,
   changed-input, unsupported-fact, nonzero-exit, lost and hung runs.
+- **Step 8** (verified, on branch `step8-search-filtering`): discovery scheduling with
+  paginated checkpoints (resume after a cap or rate limit), `Retry-After`-aware backoff,
+  a restart-safe interval scheduler with a shared lease and bounded cycles, schema-4
+  append-only `screening_decisions`, and deterministic explainable filtering that
+  distinguishes a definite mismatch from an unstated field and never converts currency.
 - **Step 7c** (verified, on branch `step7c-spawner-recovery`): the first host change
   since step 1, and generic: optional `idempotencyKey` on `POST /sessions` returns the
   existing session (200) instead of a second spawn, persisted with tmux recovery
@@ -192,18 +198,20 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 8 — search scheduling, filtering and explainable queueing
+## Next: step 9 — application preparation and immutable review package
 
-Read step 8 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md). Wire the first
-source's discovery schedule (pagination checkpoints, retry/backoff, normalized dedup)
-and scored, explainable filtering that records why each posting matched or was excluded;
-distinguish unknown salary/location from a mismatch. This is also where a real worker
-can finally drive tailoring (7b/7c are the runner and its recovery contract).
+Read step 9 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md). Implement one
+application-form adapter against fixtures (then a chosen real target), prepare answers
+and an optional cover letter, and build the review screen showing posting evidence,
+selected resume, answers and changes. Stop before submitting. A dedicated supervised
+browser profile, resumable needs-input tasks on login/CAPTCHA, and the rule that a phone
+link does not transfer the Linux browser session all apply here.
 
 Still outstanding, deliberately: a real-agent smoke needs the **tool bridge** and a
 verified CLI JSON envelope ([packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md));
-no PDF, no notifications, no submission. Optional live-host confirmation for 7c: check
-out the 7c branch, build, then restart **only** `switchboard.service` (never the owner).
+no PDF, **no notifications** (optional; the durable inbox already exists), no submission.
+Optional live-host confirmation for 7c: check out the 7c branch, build, then restart
+**only** `switchboard.service` (never the owner).
 
 Still outstanding from earlier stages, deliberately: no live board smoke test, no
 employer form automation, **no PDF output** (deferred until a real need appears), no

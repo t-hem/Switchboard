@@ -154,6 +154,33 @@ text only; captured markup is never executed.
 JOBS_BROWSER_EXECUTABLE=/absolute/path/to/chrome node packages/jobs/acceptance/capture.mjs
 ```
 
+## Discovery scheduling and screening (step 8)
+
+`GET /api/scheduler` reports real scheduling state and recent runs; `POST /api/scheduler/run`
+performs one cycle (`{force:true}` is "run now"). A background worker in the service ticks
+the same gate, so the manual route can never overlap it. Due is derived from stored run
+times and each source's `schedule.intervalMinutes` (default 360), so a restart never
+stampedes. A cycle holds the shared scheduler lease, runs due sources one at a time, is
+bounded (at most five sources, `requests.maxPostingsPerRun` per source), and records one
+source's failure without stalling the others. Paging is checkpointed in
+`search_runs.checkpoint_json`, so a cap or rate limit leaves a resumable `blocked` run; a
+`Retry-After` from a source is honoured (capped at 30s) rather than inventing a delay.
+
+Screening is deterministic and explainable. A source's `filters`
+(`keywords`, `locations`, `remote`) are applied to each newly ingested posting:
+`eligible`, `excluded` on a **definite** mismatch, or `needs_review` when the posting does
+not state the field — never a mismatch for missing data. Salary is normalized in place and
+**currency is never converted** (two currencies, or no currency, is `known:false` with the
+raw text kept). Reasons are stored per decision in `screening_decisions`.
+
+`GET /api/screening` lists decisions and counts; `POST /api/jobs/:id/skip` (requires a
+reason), `/requeue` and `/screen` are audited operator actions. Notifications are
+optional and not implemented.
+
+```sh
+node packages/jobs/acceptance/scheduling.mjs
+```
+
 ## Career library and resume rendering (step 6)
 
 Resumes are assembled from the operator's own bullets placed into base templates. All

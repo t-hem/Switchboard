@@ -63,6 +63,25 @@ try{
  const rl=(await api(base,'/api/scheduler/run',{force:true},'POST')).body;
  assert.ok(rl.results.some(entry=>entry.outcome&&entry.outcome.adapterId==='fixture'&&entry.outcome.complete===true));
 
+ // Configured filters record why a posting matched or was excluded, and operator
+ // skip/requeue actions are audited.
+ await api(base,'/api/sources/scr',{adapterId:'fixture',sourceKey:'scr',enabled:true,config:{companyName:'Scr',boardId:'scr',
+  filters:{keywords:['kubernetes'],locations:['Remote']},
+  fixture:{postings:[
+   {id:'k1',url:'https://scr.example/k1',title:'Cloud Engineer',location:'Remote',body:'Kubernetes and AWS platform work'},
+   {id:'k2',url:'https://scr.example/k2',title:'Sales Representative',location:'Denver',body:'Quota carrying sales role'},
+  ]}}},'PUT');
+ await api(base,'/api/scheduler/run',{force:true},'POST');
+ const screening=(await api(base,'/api/screening')).body;
+ assert.ok(screening.counts.eligible>=1,'a matching posting is eligible');
+ assert.ok(screening.counts.excluded>=1,'a definite mismatch is excluded');
+ const eligible=screening.decisions.find(entry=>entry.decision==='eligible');
+ assert.ok(eligible.reasons.some(reason=>reason.code==='keywords_matched'),'the match is explained');
+ await api(base,`/api/jobs/${encodeURIComponent(eligible.jobId)}/skip`,{reason:'not interested'},'POST');
+ assert.equal((await api(base,'/api/screening')).body.decisions.find(entry=>entry.jobId===eligible.jobId).decision,'skipped');
+ await api(base,`/api/jobs/${encodeURIComponent(eligible.jobId)}/requeue`,{},'POST');
+ assert.equal((await api(base,'/api/screening')).body.decisions.find(entry=>entry.jobId===eligible.jobId).decision,'eligible');
+
  // The run list is UTC and carries checkpoints.
  const runs=(await api(base,'/api/scheduler')).body.runs;
  assert.ok(runs.length>=4);
