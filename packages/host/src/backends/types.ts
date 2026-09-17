@@ -26,6 +26,11 @@ export interface SessionBackend {
   readonly persistent: boolean;
   create(request: SpawnRequest): SessionHandle;
   recover?(): { session: Session; handle: SessionHandle }[];
+  /**
+   * The terminal title the workload has set for itself, when the backend tracks one.
+   * Cosmetic and optional: a backend that does not know simply omits this.
+   */
+  displayTitle?(sessionId: string): string | undefined;
   save?(session: Session): void;
   forget?(id: string): void;
   close?(): void;

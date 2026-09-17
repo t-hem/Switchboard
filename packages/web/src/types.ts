@@ -17,6 +17,9 @@ export type Session = {
   lastOutputAt: number;
   backend?: "direct" | "tmux";
   recovery?: string;
+  /** Best-effort, read from scrollback by the host's agents.json patterns. Often absent. */
+  model?: string;
+  title?: string;
 };
 
 export type AgentInfo = { name: string; available: boolean };
@@ -54,6 +57,8 @@ export type AgentDef = {
   /** Display-only. The daemon never runs this. */
   install?: string;
   platform?: Record<string, AgentPlatformOverride>;
+  /** Cosmetic scrollback patterns; capture group 1 wins if present. */
+  display?: { model?: string; title?: string };
 };
 
 export type AgentsConfig = {

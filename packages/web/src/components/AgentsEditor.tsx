@@ -172,6 +172,12 @@ export function AgentsEditor({
         missing elsewhere. Keep <code className="text-neutral-500">cmd</code> a bare command; a
         machine-specific path belongs in that host&apos;s <code className="text-neutral-500">host.json</code>.
       </p>
+      <p className="text-xs text-neutral-600">
+        Edit as JSON to add <code className="text-neutral-500">display</code> patterns —{" "}
+        <code className="text-neutral-500">{`{"model": "…", "title": "…"}`}</code> — matched against
+        recent scrollback to label a session. Capture group 1 wins if the pattern has one. They are
+        cosmetic: a pattern that matches nothing simply shows nothing.
+      </p>
     </div>
   );
 }

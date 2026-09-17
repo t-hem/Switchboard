@@ -42,6 +42,29 @@ export function parseAgentsPayload(body: unknown): { ok: true; value: AgentsConf
     if (raw["args"] !== undefined) def.args = raw["args"];
     if (raw["install"] !== undefined) def.install = raw["install"];
 
+    if (raw["display"] !== undefined) {
+      if (!isRecord(raw["display"])) {
+        return { ok: false, error: `agent "${name}": "display" must be an object` };
+      }
+      const display: NonNullable<AgentDef["display"]> = {};
+      for (const key of ["model", "title"] as const) {
+        const value = raw["display"][key];
+        if (value === undefined) continue;
+        if (typeof value !== "string") {
+          return { ok: false, error: `agent "${name}": display.${key} must be a string` };
+        }
+        // Rejected at the door rather than at match time: a pattern that cannot compile
+        // would otherwise sync to every machine and silently show nothing on all of them.
+        try {
+          new RegExp(value);
+        } catch {
+          return { ok: false, error: `agent "${name}": display.${key} is not a valid regular expression` };
+        }
+        display[key] = value;
+      }
+      if (Object.keys(display).length > 0) def.display = display;
+    }
+
     if (raw["platform"] !== undefined) {
       if (!isRecord(raw["platform"])) {
         return { ok: false, error: `agent "${name}": "platform" must be an object` };

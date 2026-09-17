@@ -118,3 +118,32 @@ test("preserves arbitrary binary bytes, including NUL and 0xff", () => {
   r.append(Buffer.from([0x00, 0xff, 0x1b, 0x5b, 0x41, 0x07]));
   assert.deepEqual([...r.read()], [0x00, 0xff, 0x1b, 0x5b, 0x41, 0x07]);
 });
+
+test("tail returns the most recent bytes, across the wrap and at the edges", () => {
+  const r = new RingBuffer(6);
+  assert.deepEqual([...r.tail(4)], []);
+
+  r.append(Buffer.from("abcd"));
+  assert.deepEqual([...r.tail(2)].map(Number), [...Buffer.from("cd")]);
+  // Asking for more than is retained yields everything, never padding.
+  assert.deepEqual([...r.tail(99)].map(Number), [...Buffer.from("abcd")]);
+
+  // Wrapped: retained is "cdefgh", and the tail must not read across the seam wrongly.
+  r.append(Buffer.from("efgh"));
+  assert.equal(r.read().toString(), "cdefgh");
+  assert.equal(r.tail(3).toString(), "fgh");
+  assert.equal(r.tail(6).toString(), "cdefgh");
+  assert.equal(r.tail(0).toString(), "");
+});
+
+test("tail agrees with read for every length at every wrap offset", () => {
+  const cap = 8;
+  const r = new RingBuffer(cap);
+  for (let step = 0; step < 40; step++) {
+    r.append(Buffer.from([97 + (step % 26)]));
+    const whole = r.read();
+    for (let n = 0; n <= whole.length; n++) {
+      assert.equal(r.tail(n).toString("hex"), whole.subarray(whole.length - n).toString("hex"), `step ${step} n ${n}`);
+    }
+  }
+});

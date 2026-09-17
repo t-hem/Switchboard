@@ -72,7 +72,14 @@ export function SessionList({
                 >
                   <StatusDot activity={reachable ? activityOf(session, now) : "unknown"} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-neutral-200">{session.label}</span>
+                    {/* A title the agent gave itself says more than the directory and
+                        binary do, so it takes the first line when one was found. The
+                        label then moves down rather than away: it is the only thing
+                        saying *where* this session is. Both fields are best-effort and
+                        usually absent, so the row must read correctly without them. */}
+                    <span className="block truncate text-sm text-neutral-200">
+                      {session.title ?? session.label}
+                    </span>
                     <span className="block truncate text-xs text-neutral-500">
                       {!reachable
                         ? "host unreachable — state unknown"
@@ -88,7 +95,16 @@ export function SessionList({
                           {session.pid}
                         </>
                       )}
+                      {session.model !== undefined && (
+                        <>
+                          {" · "}
+                          <span className="text-neutral-400">{session.model}</span>
+                        </>
+                      )}
                     </span>
+                    {session.title !== undefined && (
+                      <span className="block truncate text-xs text-neutral-600">{session.label}</span>
+                    )}
                     {session.recovery && <span className="block text-xs text-amber-400">{session.recovery}</span>}
                   </span>
                   {reachable && (

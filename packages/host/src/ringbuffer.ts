@@ -58,6 +58,21 @@ export class RingBuffer {
     return Buffer.concat([this.#buf.subarray(this.#pos), this.#buf.subarray(0, this.#pos)]);
   }
 
+  /**
+   * The most recent `bytes` retained bytes, oldest first. Callers that only want to
+   * look at recent output should use this rather than `read()`, which copies the whole
+   * buffer — at the default 256 KiB that is a real cost to repeat on every poll.
+   */
+  tail(bytes: number): Buffer {
+    const want = Math.min(Math.max(0, Math.floor(bytes)), this.length);
+    if (want === 0) return Buffer.alloc(0);
+    if (!this.#filled) return Buffer.from(this.#buf.subarray(this.#pos - want, this.#pos));
+    const cap = this.#buf.length;
+    const start = (this.#pos - want + cap) % cap;
+    if (start + want <= cap) return Buffer.from(this.#buf.subarray(start, start + want));
+    return Buffer.concat([this.#buf.subarray(start), this.#buf.subarray(0, this.#pos)]);
+  }
+
   clear(): void {
     this.#pos = 0;
     this.#filled = false;

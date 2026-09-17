@@ -8,6 +8,8 @@ import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
 import { createSessionBackend } from "./platform/index.js";
 import { configDir } from "./config.js";
+import { SCAN_BYTES, extractDisplay } from "./display.js";
+import type { DisplayFields } from "./display.js";
 import { RingBuffer } from "./ringbuffer.js";
 import type { HostConfig, Session } from "./types.js";
 
@@ -56,6 +58,8 @@ type SessionRuntime = {
   subscribers: Set<Subscriber>;
   /** Resolved when the pty actually exits, so termination can be awaited. */
   exitWaiters: Set<() => void>;
+  /** Last scrollback scan, reused until new output or a new terminal title makes it stale. */
+  display: { at: number; title: string | undefined; fields: DisplayFields } | null;
 };
 
 function validateCwd(cwd: string): string {
@@ -95,11 +99,42 @@ export class SessionManager {
     for (const { session, handle } of this.backend.recover?.() ?? []) {
       if (!this.#sessions.has(session.id)) this.#register(session, handle);
     }
-    return [...this.#sessions.values()].map((r) => r.session);
+    return [...this.#sessions.values()].map((r) => this.#decorate(r));
   }
 
   get(id: string): Session | null {
-    return this.#sessions.get(id)?.session ?? null;
+    const runtime = this.#sessions.get(id);
+    return runtime ? this.#decorate(runtime) : null;
+  }
+
+  /**
+   * Attach the agent's cosmetic display fields to a copy of the session.
+   *
+   * A copy because `session` is persisted metadata on the tmux backend, and these
+   * fields are derived per response rather than stored. Rescanned only when there has
+   * been new output since the last scan, so an idle fleet costs one cache read per poll.
+   * Failure is silence by design (spec §2): a row renders with whatever it already had.
+   */
+  #decorate(runtime: SessionRuntime): Session {
+    const patterns = this.registry.config.agents[runtime.session.agent]?.display;
+    try {
+      const terminalTitle = this.backend.displayTitle?.(runtime.session.id);
+      let cached = runtime.display;
+      if (cached === null || cached.at !== runtime.session.lastOutputAt || cached.title !== terminalTitle) {
+        const text = runtime.scrollback.tail(SCAN_BYTES).toString("utf8");
+        cached = {
+          at: runtime.session.lastOutputAt,
+          title: terminalTitle,
+          fields: extractDisplay(text, patterns, terminalTitle),
+        };
+        runtime.display = cached;
+      }
+      const { model, title } = cached.fields;
+      if (model === undefined && title === undefined) return runtime.session;
+      return { ...runtime.session, ...(model !== undefined && { model }), ...(title !== undefined && { title }) };
+    } catch {
+      return runtime.session;
+    }
   }
 
   /**
@@ -190,6 +225,7 @@ export class SessionManager {
       scrollback: new RingBuffer(this.hostConfig.scrollbackBytes),
       subscribers: new Set(),
       exitWaiters: new Set(),
+      display: null,
     };
     this.#sessions.set(id, runtime);
     if (!this.backend.persistent) this.ledger.add({ id, pid: child.pid, agent: session.agent, cwd: session.cwd, startedAt: session.createdAt });

@@ -10,7 +10,7 @@ import { ptyChunkToBytes } from "../ptybytes.js";
 import { TmuxQueryFilter } from "./tmux-queries.js";
 import { captureTerminal, TmuxInputModes } from "./tmux-display.js";
 
-type Pane = { target: string; pid: number; dead: boolean; exitCode: number | null; metadata: string };
+type Pane = { target: string; pid: number; dead: boolean; exitCode: number | null; metadata: string; title: string };
 const command = (file: string, args: string[]): string => {
   try {
     return execFileSync(file, args, {
@@ -70,23 +70,40 @@ export class LinuxTmuxBackend implements SessionBackend {
     // list-panes requires a current target even with -a; a fresh replacement
     // owner has none. Empty inventory is different from an unreachable owner.
     if (!this.#tmux("list-sessions", "-F", "#{session_name}")) return [];
-    const output = this.#tmux("list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_dead_status}\t#{@switchboard-metadata}");
+    // pane_title is last and rejoined: it is arbitrary text the workload chose and may
+    // itself contain a tab, whereas every field before it is base64 or numeric.
+    const output = this.#tmux("list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}\t#{pane_dead}\t#{pane_dead_status}\t#{@switchboard-metadata}\t#{pane_title}");
     return output ? output.split("\n").map(line => {
-      const [target, pid, dead, status, metadata] = line.split("\t");
-      return { target: target!, pid: Number(pid), dead: dead === "1", exitCode: status ? Number(status) : null, metadata: metadata ?? "" };
+      const [target, pid, dead, status, metadata, ...title] = line.split("\t");
+      return { target: target!, pid: Number(pid), dead: dead === "1", exitCode: status ? Number(status) : null,
+        metadata: metadata ?? "", title: title.join("\t") };
     }) : [];
   }
   #tag(entry: RecoveryEntry): void {
     this.#tmux("set-option", "-t", entry.target, "@switchboard-metadata", Buffer.from(JSON.stringify(entry)).toString("base64"));
   }
   #persist(entry: RecoveryEntry): void { this.#registry.put(entry); this.#entries.set(entry.session.id, entry); }
+  /**
+   * Live terminal titles by session id, refreshed by each enumeration. Cosmetic, so it
+   * is never persisted into pane metadata — a title changes constantly and writing it
+   * back would mean a tmux round trip per change for something only used to draw a row.
+   */
+  readonly #titles = new Map<string, string>();
+
+  displayTitle(sessionId: string): string | undefined {
+    return this.#titles.get(sessionId);
+  }
+
   #discover(): void {
     try {
       for (const pane of this.#panes()) {
+        const prefix = `sw-${this.#config.ownerId}-`;
+        if (pane.target.startsWith(prefix) && pane.title) {
+          this.#titles.set(pane.target.slice(prefix.length), pane.title);
+        }
         let raw: unknown;
         try { raw = JSON.parse(Buffer.from(pane.metadata, "base64").toString()); } catch { raw = null; }
         if (!isRecoveryEntry(raw) || raw.ownerId !== this.#config.ownerId || raw.target !== pane.target) {
-          const prefix = `sw-${this.#config.ownerId}-`;
           if (!pane.target.startsWith(prefix)) continue;
           const id = pane.target.slice(prefix.length);
           if (!/^[a-zA-Z0-9_-]+$/.test(id)) continue;
