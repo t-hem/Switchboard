@@ -47,6 +47,28 @@ export class Applications {
     });
   }
 
+  /**
+   * Choosing which resume an application uses is an ordinary operator act. The resume must
+   * have been built for a capture of this same job, so a resume can never be crossed over
+   * between postings by mistake.
+   */
+  selectResume(applicationId: string, resumeVersionId: string): { applicationId: string; resumeVersionId: string } {
+    const db = this.deps.db;
+    const application = db.prepare("SELECT id,job_id FROM applications WHERE id=?").get(applicationId) as Record<string, unknown> | undefined;
+    if (!application) throw new AppError("application_missing", "Application not found", 404);
+    const resume = db.prepare("SELECT id,job_snapshot_id FROM resume_versions WHERE id=?").get(resumeVersionId) as Record<string, unknown> | undefined;
+    if (!resume) throw new AppError("resume_missing", "Resume version not found", 404);
+    const snapshot = db.prepare("SELECT job_id FROM job_snapshots WHERE id=?").get(String(resume["job_snapshot_id"])) as Record<string, unknown> | undefined;
+    if (!snapshot || String(snapshot["job_id"]) !== String(application["job_id"]))
+      throw new AppError("resume_mismatch", "That resume was built for a different posting", 409);
+    const time = new Date(this.now()).toISOString();
+    transaction(db, () => {
+      db.prepare("UPDATE applications SET selected_resume_id=?, updated_at=? WHERE id=?").run(resumeVersionId, time, applicationId);
+      event(db, "application.resume_selected", "application", applicationId, { resumeVersionId }, this.now());
+    });
+    return { applicationId, resumeVersionId };
+  }
+
   /** An operator-reported completion is evidence, not an inference: the receipt is stored verbatim. */
   manualCompletion(applicationId: string, input: { detail: string; receiptText?: string; settingsRevision: number }): { attemptId: string; created: boolean } {
     const db = this.deps.db;
@@ -99,8 +121,11 @@ export class Applications {
       ? { attemptId: decision["subject_id"], manifestHash: decision["subject_version"], approvedAt: decision["created_at"], reason: "recorded approval",
         current: String(decision["subject_id"]) === String(attemptRow?.["id"]) && attemptRow?.["state"] === "approved" }
       : null;
+    // Every resume built for this job's captures, so the operator can choose one.
+    const availableResumes = db.prepare(`SELECT r.id,r.phase,r.created_at,r.parent_resume_id,r.agent_run_id,r.text_artifact_hash,r.pdf_artifact_hash
+      FROM resume_versions r JOIN job_snapshots s ON s.id=r.job_snapshot_id WHERE s.job_id=? ORDER BY r.created_at DESC, r.rowid DESC LIMIT 50`).all(String(application["job_id"]));
     return {
-      application, job: job ?? null, snapshot: snapshot ?? null, resume: resume ?? null, agentRun, attempt, approval,
+      application, job: job ?? null, snapshot: snapshot ?? null, resume: resume ?? null, availableResumes, agentRun, attempt, approval,
       changesSinceReview: approvedManifest && current ? this.#changes(approvedManifest, current) : null,
       handoff: this.openHandoff(applicationId),
     };

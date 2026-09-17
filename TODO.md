@@ -24,7 +24,12 @@ that turns an interrupted send into `unknown` rather than a retry. Step 11 added
 application records (both resume passes, persona/prompt/skills, tool results, decisions,
 receipts), a self-contained export reconstructible offline with no database, storage health
 that names every gap, queue repair that never retries an interrupted submission, and a
-read-only restore that refuses writes. Step 12 (rollout) is next.
+read-only restore that refuses writes. All of it is now merged to `master` and every stage
+branch is deleted. Step 12 is in progress: `JOBS-OPERATIONS.md` documents install through
+upgrades, `acceptance/rollout.mjs` verifies a fresh data directory end to end, the agent API
+key path is verified, and the resume-selection gap it exposed is fixed. Remaining: the crash
+matrix, the affected regressions, a real posting in draft-only mode, phone results, and the
+tool bridge that blocks the real-model tailoring pass.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.

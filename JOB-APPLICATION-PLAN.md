@@ -811,6 +811,39 @@ the configured UI after this initial validation; leave defaults disabled in code
 
 **Commit:** `docs(jobs): validate local rollout and operating procedures`.
 
+### 2026-09-17 — step 12 in progress (fresh-directory rollout verified)
+
+The stack is merged to `master` (`b68bdc7`) and every stage branch is deleted locally and on
+the remote.
+
+- **Operating procedures written**: `JOBS-OPERATIONS.md` covers what runs where, prerequisites,
+  install and first run, where secrets live (and that `host.json` is read at startup only),
+  first-run configuration, everyday operation, backup/restore/export/health/repair, upgrades,
+  publishing the client, machine-local paths that must stay out of git, and the limitations to
+  know before real use.
+- **The API key path is verified end to end**: after restarting `switchboard.service`, a newly
+  spawned child's environment contained `OPENROUTER_API_KEY`, so agent children run on the
+  operator's separate key. `host.json` is not hot-reloaded; `agents.json` is.
+- **Host restart is verified on real sessions**: three live tmux sessions survived a
+  `switchboard.service` restart and remained attachable.
+- **A gap found and fixed while rehearsing**: there was no way to select a resume for an
+  application over HTTP, so preparation always blocked with `missing_resume`. Added
+  `POST /api/applications/:id/resume` (refusing a resume built for a different posting), a
+  client control, and a test. 118 jobs tests now pass.
+- **`acceptance/rollout.mjs`** runs a genuinely fresh data directory end to end with real
+  Chromium: defaults land disabled/paused with all gates on; discovery works; a real page is
+  captured as complete evidence; the library renders the real profile facts; the resume is
+  selected; the site policy is relaxed explicitly; preparation fills the employer's own form;
+  the package is reviewed and approved; one submission is sent; the record and a self-contained
+  export reconstruct offline with no database; health is clean; then a jobs restart during
+  submission ambiguity turns the interrupted send into `unknown` (never a retry), reconciliation
+  records the operator's outcome, and all history survives.
+
+Still outstanding for step 12: the full crash matrix (each service separately and both
+together, with the host/platform/claim/browser regressions), the real-posting draft-only
+readability check, phone results, and the real-model tailoring pass that the tool bridge
+blocks.
+
 ## Starter defaults and inputs needed only at rollout
 
 The operator delegated initial companies, IT filters and generic personas/tools. Use

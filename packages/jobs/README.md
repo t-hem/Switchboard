@@ -1,8 +1,10 @@
 # Jobs service
 
-Linux-only, optional, and independent of Switchboard. No discovery, agents, browser
-work or application submission runs yet, even if enabled. The standalone dashboard
-reports that limitation. Initial settings are disabled/paused with
+Linux-only, optional, and independent of Switchboard. Discovery, evidence capture,
+screening, resume rendering, application preparation and gated submission all run; the
+model-driven tailoring pass does not yet, because its tool bridge is missing (see
+[PERSONAS.md](./PERSONAS.md)). Operating procedures are in
+[JOBS-OPERATIONS.md](../../JOBS-OPERATIONS.md). Initial settings are disabled/paused with
 all review gates enabled. SQLite stores each settings revision; stale saves return 409.
 
 ## Install and run
@@ -236,6 +238,7 @@ node packages/jobs/acceptance/review.mjs   # routes, plus the screen with JOBS_B
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/forms.mjs
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/submission.mjs
 node packages/jobs/acceptance/records.mjs
+JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/rollout.mjs
 ```
 
 ```sh

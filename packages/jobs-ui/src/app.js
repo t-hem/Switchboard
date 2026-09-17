@@ -214,7 +214,18 @@ async function showPackage(applicationId){
   resume.append(artifactButton('Download resume text',pkg.resume.text_artifact_hash));
   resume.append(document.createTextNode(pkg.resume.pdf_artifact_hash?' PDF available.':' PDF output is not implemented; preparation uploads the text artifact.'));
   if(pkg.agentRun)resume.append(button(`View agent run (${pkg.agentRun.state})`,()=>showRecord(`/api/agents/${encodeURIComponent(pkg.agentRun.id)}`,'Agent run')));
- } else resume.append(document.createTextNode('Select a resume version before preparing.'));
+ } else {
+  resume.append(document.createTextNode('No resume is selected. Pick one built for this posting:\n'));
+  const select=document.createElement('select');
+  for(const candidate of pkg.availableResumes??[]){const option=document.createElement('option');
+   option.value=candidate.id;option.textContent=`${candidate.phase} · ${String(candidate.id).slice(0,8)} · ${candidate.created_at}`;select.append(option);}
+  resume.append(select);
+  resume.append(button('Use this resume for this application',async()=>{
+   if(!select.value){message('There is no rendered resume for this posting yet; render one first.');return;}
+   await request(`/api/applications/${encodeURIComponent(applicationId)}/resume`,{resumeVersionId:select.value},'POST');
+   message('Resume selected for this application.');await showPackage(applicationId);}));
+  resume.append(document.createTextNode('Rendered resumes for this posting appear here after you render one from the career library.'));
+ }
 
  if(manifest){
   add('p',`Prepared ${manifest.preparedAt} with ${manifest.adapterId} v${manifest.adapterVersion}. Manifest ${String(manifest.manifestHash).slice(0,12)}…`);

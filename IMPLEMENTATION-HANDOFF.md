@@ -232,7 +232,15 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 12 — end-to-end rollout on this machine
+## State as of 2026-09-17
+
+Everything through step 11 is merged to `master` (`b68bdc7`) and pushed; all stage branches
+are deleted locally and on the remote. Operating procedures live in
+[JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md). The resume-selection gap found during the rollout
+rehearsal is fixed (`POST /api/applications/:id/resume`). `acceptance/rollout.mjs` verifies a
+fresh data directory end to end, including a jobs restart during submission ambiguity.
+
+## Next: finish step 12 — crash matrix, regressions, real posting
 
 Step 9 is **complete and verified** on branch `step9-application-prep`: the supervised
 browser with verifiable crash cleanup, real form filling and upload against a fixture site
@@ -257,10 +265,12 @@ storage health that names every gap (including no recorded backup), queue repair
 releases expired leases but never retries an interrupted submission, and a read-only
 restore that refuses every write. `acceptance/records.mjs` covers it end to end.
 
-Step 12 (rollout) is next: install and first-run documentation, fresh-data-directory
-end-to-end verification, secrets/browser login, pause/disable, backup/restore and upgrade
-notes, keeping machine-local paths out of git and publishing the web bundle only after
-isolated acceptance passes.
+What remains of step 12: the full crash matrix (crash the host, crash jobs, crash both, and
+confirm surviving children stay attachable while dead ones are recorded and preparation can
+restart from saved inputs), the affected host/platform/claim/browser regressions, a real
+posting captured in draft-only mode to judge page extraction and resume readability, and real
+phone results. After those, the real-model tailoring pass — and for that the **tool bridge**
+is the blocker, not data.
 
 Step 9 in one place:
 

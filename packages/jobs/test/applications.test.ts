@@ -33,7 +33,7 @@ function fixture(t: TestContext) {
   store.db.prepare("UPDATE applications SET selected_resume_id='resume-1' WHERE id=?").run(applicationId);
   const preparation = new PreparationService({ store, db: store.db, artifacts, http: offline, now: () => NOW });
   const applications = new Applications({ db: store.db, artifacts, now: () => NOW });
-  return { store, artifacts, preparation, applications, applicationId, snapshotId };
+  return { store, artifacts, postings, library, preparation, applications, applicationId, snapshotId };
 }
 // The fixture form requires a name and an email; the resume is supplied automatically.
 const run = (id: string, answers: Record<string, string> = {}) => ({ applicationId: id, adapterId: "fixture",
@@ -79,6 +79,26 @@ test("an operator-reported manual completion stores the receipt it was given", a
   const receipt = JSON.parse(JSON.stringify(attempt));
   assert.ok(receipt.receipt_hash, "the receipt is recorded as evidence, not asserted");
   assert.equal(applications.manualCompletion(applicationId, { detail: "Submitted on the employer site", receiptText: "Reference: ABC-123", settingsRevision: 1 }).created, false, "the same report is never recorded twice");
+});
+
+test("choosing a resume is recorded, and one built for another posting is refused", async (t) => {
+  const { applications, store, postings, library, applicationId, artifacts } = fixture(t);
+  store.db.prepare("UPDATE applications SET selected_resume_id=NULL WHERE id=?").run(applicationId);
+  applications.selectResume(applicationId, "resume-1");
+  assert.equal(store.db.prepare("SELECT selected_resume_id FROM applications WHERE id=?").get(applicationId)!.selected_resume_id, "resume-1");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM events WHERE kind='application.resume_selected'").get()!.n, 1);
+  assert.throws(() => applications.selectResume(applicationId, "no-such-resume"), /Resume version not found/);
+
+  // A resume that belongs to a different posting can never be crossed over.
+  const other = postings.ingest({ adapterId: "fixture", company: "Other", title: "Other", originalUrl: "https://other.example/1", descriptionText: "Other body", provenance: "browser" });
+  const otherSnapshot = postings.recordSnapshot({ jobId: other.jobId, purpose: "discovery", fetchedUrl: "u", finalUrl: "u", descriptionText: "Other body",
+    screenshot: Buffer.from("png"), captureVersion: "browser:1", capture: {}, completeness: "complete" }).snapshotId;
+  const hash = artifacts.put(Buffer.from("other resume", "utf8"), "text/plain", "resume-text").hash;
+  store.db.prepare(`INSERT INTO resume_versions(id,job_snapshot_id,profile_revision_id,template_revision_id,parent_resume_id,agent_run_id,phase,source_json,selected_bullets_json,edits_json,text_artifact_hash,pdf_artifact_hash,created_at)
+    VALUES('resume-other',?,?,?,NULL,NULL,'render','{}','[]','{}',?,NULL,?)`).run(otherSnapshot,
+    String(store.db.prepare("SELECT id FROM profile_revisions LIMIT 1").get()!.id), String(store.db.prepare("SELECT id FROM template_revisions LIMIT 1").get()!.id), hash, new Date(NOW).toISOString());
+  assert.throws(() => applications.selectResume(applicationId, "resume-other"), /different posting/);
+  assert.equal(library !== undefined, true);
 });
 
 test("a handoff block is resolved with the recorded context and can continue", async (t) => {

@@ -43,6 +43,11 @@ export function applicationsRoutes(app: FastifyInstance, store: SettingsStore, d
 
   app.get<{ Params: { id: string } }>("/api/applications/:id/package", async req => applications.packageOf(req.params.id));
 
+  app.post<{ Params: { id: string }; Body: { resumeVersionId: string } }>("/api/applications/:id/resume", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["resumeVersionId"],
+      properties: { resumeVersionId: { type: "string", minLength: 1, maxLength: 64 } } } },
+  }, async req => applications.selectResume(req.params.id, req.body.resumeVersionId));
+
   app.post<{ Params: { id: string }; Body: { code?: string; note: string; answers?: Record<string, string>; adapterOptions?: Record<string, unknown> } }>("/api/applications/:id/resolve", {
     schema: { body: { type: "object", additionalProperties: false, required: ["note"],
       properties: { code: { type: "string", maxLength: 64 }, note: { type: "string", minLength: 1, maxLength: 2000 },
