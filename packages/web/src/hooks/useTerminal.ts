@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { probeStreamAccess, streamUrl } from "../api/client.ts";
 import type { HostEntry } from "../types.ts";
+import { TerminalSnapshots, type TerminalSnapshot } from "./terminalSnapshots.ts";
 
 export type ConnectionState =
   | "connecting"
@@ -79,6 +80,7 @@ export function useTerminal({
   // Mirrors `atBottom` so the per-render check can bail without touching state.
   const atBottomRef = useRef(true);
   const termRef = useRef<Terminal | null>(null);
+  const snapshotsRef = useRef<TerminalSnapshots | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(BACKOFF_START_MS);
@@ -143,6 +145,7 @@ export function useTerminal({
   );
 
   const scrollToBottom = useCallback(() => {
+    snapshotsRef.current?.latest();
     termRef.current?.scrollToBottom();
   }, []);
 
@@ -156,6 +159,7 @@ export function useTerminal({
   useEffect(() => {
     const host = container.current;
     if (!host || !entry || !sessionId) return;
+    let disposed = false;
 
     closedRef.current = false;
     setState("connecting");
@@ -168,7 +172,7 @@ export function useTerminal({
       cursorBlink: true,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
-      scrollback: 5000,
+      scrollback: 50000,
       allowProposedApi: true,
       theme: { background: "#0b0d10", foreground: "#e6e8eb", cursor: "#e6e8eb" },
     });
@@ -252,8 +256,10 @@ export function useTerminal({
       atBottomRef.current = next;
       setAtBottom(next);
     };
-    const scrollSub = term.onScroll(syncAtBottom);
-    const renderSub = term.onRender(syncAtBottom);
+    const snapshots = new TerminalSnapshots(term, syncAtBottom);
+    snapshotsRef.current = snapshots;
+    const scrollSub = term.onScroll(() => { snapshots.scrolled(); syncAtBottom(); });
+    const renderSub = term.onRender(() => { snapshots.scrolled(); syncAtBottom(); });
 
     // The last size this client successfully measured. Kept because a fit can fail
     // (a container with no layout yet) at exactly the moment the size is needed.
@@ -328,7 +334,7 @@ export function useTerminal({
       resizeTimer = window.setTimeout(() => {
         if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
         resizeFrame = requestAnimationFrame(() => {
-          if (closedRef.current) return;
+          if (disposed) return;
           if (host.clientWidth === fittedTo.width && host.clientHeight === fittedTo.height) return;
           fittedTo = { width: host.clientWidth, height: host.clientHeight };
           sendSize();
@@ -346,17 +352,19 @@ export function useTerminal({
 
     const connect = (): void => {
       if (closedRef.current) return;
+      let snapshotHistory = "";
       const socket = new WebSocket(streamUrl(entry, sessionId, clientId, clientLabel));
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
 
       socket.onopen = () => {
-        if (closedRef.current) return;
+        if (disposed || socket !== socketRef.current || closedRef.current) return;
         backoffRef.current = BACKOFF_START_MS;
         setState("connected");
         // The scrollback replay that follows is the full history; clear first so a
         // reconnect repaints rather than appends.
         term.reset();
+        snapshots.reset();
         // Adopt this client's size immediately: the pty may still be sized for
         // whichever device attached last, and a TUI redrawing at the wrong width
         // writes over the lines below it rather than simply looking narrow.
@@ -371,10 +379,16 @@ export function useTerminal({
       };
 
       socket.onmessage = (event: MessageEvent<ArrayBuffer | string>) => {
+        if (disposed || socket !== socketRef.current) return;
         if (typeof event.data === "string") {
           try {
-            const msg = JSON.parse(event.data) as { type?: string; exitCode?: number; reason?: string };
-            if (msg.type === "exit") {
+            const msg = JSON.parse(event.data) as Partial<Omit<TerminalSnapshot, "type">> & { type?: string; exitCode?: number; reason?: string };
+            if (msg.type === "snapshot") {
+              if (typeof msg.history === "string") snapshotHistory = msg.history;
+              snapshots.receive({ ...msg, history: snapshotHistory } as TerminalSnapshot);
+              const waiters = outputWaitersRef.current.splice(0);
+              for (const waiter of waiters) waiter();
+            } else if (msg.type === "exit") {
               setExitCode(msg.exitCode ?? null);
               setState("exited");
               closedRef.current = true;
@@ -401,7 +415,7 @@ export function useTerminal({
       };
 
       socket.onclose = (event) => {
-        if (closedRef.current) return;
+        if (disposed || socket !== socketRef.current || closedRef.current) return;
         // 4404: the daemon no longer has this session.
         if (event.code === 4404) {
           setState("gone");
@@ -434,6 +448,7 @@ export function useTerminal({
     connect();
 
     return () => {
+      disposed = true;
       closedRef.current = true;
       outputWaitersRef.current = [];
       if (retryTimerRef.current !== null) window.clearTimeout(retryTimerRef.current);
@@ -446,6 +461,8 @@ export function useTerminal({
       scrollSub.dispose();
       renderSub.dispose();
       inputSub.dispose();
+      snapshots.dispose();
+      snapshotsRef.current = null;
       socketRef.current?.close();
       socketRef.current = null;
       term.dispose();

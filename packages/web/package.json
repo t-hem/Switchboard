@@ -12,7 +12,8 @@
     "accept:multi": "node acceptance/multi-host.mjs",
     "accept:sync": "node acceptance/agent-sync.mjs",
     "accept:claim": "node acceptance/claim.mjs",
-    "accept:mobile": "node acceptance/mobile.mjs"
+    "accept:mobile": "node acceptance/mobile.mjs",
+    "accept:display": "node --import tsx acceptance/display.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

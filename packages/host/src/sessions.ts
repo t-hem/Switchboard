@@ -122,6 +122,10 @@ export class SessionManager {
     return this.#sessions.size;
   }
 
+  supportsSnapshots(id: string): boolean { return !!this.#require(id).pty.snapshot; }
+
+  snapshot(id: string) { return this.#require(id).pty.snapshot?.(); }
+
   create(opts: CreateOptions): Session {
     if (this.#shuttingDown) throw new SessionError("Host is shutting down", 503);
     const resolvedAgent = this.registry.resolved(opts.agent);
@@ -233,7 +237,7 @@ export class SessionManager {
 
   resize(id: string, cols: number, rows: number): void {
     const runtime = this.#require(id);
-    if (runtime.session.status !== "running") return;
+    if (runtime.session.status !== "running" && !runtime.pty.snapshot) return;
     const c = clampDimension(cols, DEFAULT_COLS);
     const r = clampDimension(rows, DEFAULT_ROWS);
     if (c === runtime.session.cols && r === runtime.session.rows) return;

@@ -1,4 +1,5 @@
 import type { Session } from "../types.js";
+import type { TerminalSnapshot } from "../platform/tmux-display.js";
 
 export type SpawnRequest = {
   session: Session;
@@ -14,6 +15,7 @@ export interface SessionHandle {
   onExit(callback: (exitCode: number | null) => void): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
+  snapshot?(): Promise<TerminalSnapshot>;
   signal(force: boolean): void;
   /** Release only the daemon's transport, never the persistent workload. */
   disconnect(): void;

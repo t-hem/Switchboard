@@ -22,6 +22,17 @@ to directly.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
   another agent's branch; create a new branch for unrelated work.
 
+## Merge status (2026-09-16)
+
+`origin/master`'s terminal-display fixes (`b3dc00f`, by the other agent) were merged
+into `step7c-spawner-recovery` with **no conflicts** — git auto-merged `server.ts`,
+`sessions.ts` and `TODO.md`. The idempotency work and the display/scrollback work coexist:
+`server.ts` has both `idempotencyKey` and the snapshot-mode stream path; `sessions.ts`
+has both `findByIdempotencyKey` and `supportsSnapshots`/`snapshot`. The jobs stack now
+sits on top of master's display fixes, so anything built from
+`step7c-spawner-recovery` includes them. Lower branches remain based on the older
+master; only this branch carries the merge.
+
 ## Environment
 
 - Node **22.23.2** is required (`.nvmrc`); the default shell Node is v20.20.2. Prefix
