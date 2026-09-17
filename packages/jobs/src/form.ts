@@ -18,11 +18,23 @@ type FormGlobals = {
   Event: new (type: string, init?: { bubbles?: boolean }) => unknown;
 };
 type UploadHandle = { uploadFile(...paths: string[]): Promise<void> };
+type ClickHandle = { click(): Promise<void>; dispose(): Promise<void> };
+type NamedControl = ControlLike & { form: ControlLike | null };
 
-/** A site's own non-submitting validation control, never the submit button. */
-const PREVIEW_SELECTOR = "[data-apply-action='preview'], button[name='preview'], input[type='submit'][value*='review' i]";
-/** The real submit control; only `submitForm` may touch this. */
-const SUBMIT_SELECTOR = "[data-apply-action='submit'], button[type='submit'], input[type='submit']";
+/**
+ * Candidates for a site's own non-submitting validation control. A candidate is clicked only
+ * if it cannot submit a form: a `<button>` needs an explicit `type="button"` (a button with no
+ * type submits its form) and an `<input>` must be `type="button"`.
+ */
+const PREVIEW_SELECTOR = "[data-apply-action='preview'], button[name='preview'], input[type='button'][name='preview']";
+/** An explicitly marked submit control, anywhere on the page. */
+const MARKED_SUBMIT_SELECTOR = "[data-apply-action='submit']";
+/**
+ * Otherwise, a generic submit control inside the application form (the form that owns most
+ * of the named fields), never a search or newsletter form elsewhere on the page. Explicit
+ * submit types win over a type-less button.
+ */
+const FORM_SUBMIT_SELECTORS = ["button[type='submit'], input[type='submit']", "button:not([type])"];
 /** A confirmation the site actually rendered, plus any reference it printed. */
 const CONFIRMATION_SELECTOR = "[data-apply-confirmation], #confirmation, [role='status'][data-apply-result]";
 const REFERENCE_SELECTOR = "[data-apply-reference]";
@@ -124,10 +136,18 @@ export class PuppeteerFormSession implements FormSession {
   /** Clicks only the site's own preview/validation control; returns false if there is none. */
   async clickPreview(): Promise<boolean> {
     const page = this.requirePage();
-    const control: UploadHandle | null = await page.$(PREVIEW_SELECTOR);
-    if (!control) return false;
-    // A click on a non-submitting control is allowed; the submit control is never targeted.
-    await (control as unknown as { click(): Promise<void> }).click();
+    const handle = await page.evaluateHandle((selector: string) => {
+      const g = globalThis as unknown as FormGlobals;
+      return Array.from(g.document.querySelectorAll(selector)).map(element => element as ControlLike).find(el => {
+        const tagName = el.tagName.toLowerCase(), type = (el.getAttribute("type") ?? "").toLowerCase();
+        // Anything that could submit or reset the form is never a preview, whatever it is named.
+        if (tagName === "button" || tagName === "input") return type === "button";
+        return true;
+      }) ?? null;
+    }, PREVIEW_SELECTOR);
+    const control = handle.asElement() as unknown as ClickHandle | null;
+    if (!control) { await handle.dispose(); return false; }
+    try { await control.click(); } finally { await control.dispose().catch(() => undefined); }
     await page.waitForNetworkIdle({ idleTime: 400, timeout: Math.min(this.options.timeoutMs ?? 20_000, 8000) }).catch(() => undefined);
     return true;
   }
@@ -142,13 +162,28 @@ export class PuppeteerFormSession implements FormSession {
    */
   async submitForm(): Promise<SubmitConfirmation> {
     const page = this.requirePage();
-    const control: UploadHandle | null = await page.$(SUBMIT_SELECTOR);
-    if (!control) throw new NothingSentError("submit_control_missing", "The form has no submit control; nothing was sent", false);
+    const handle = await page.evaluateHandle((marked: string, generic: string[]) => {
+      const g = globalThis as unknown as FormGlobals;
+      const explicit = g.document.querySelector(marked);
+      if (explicit) return explicit;
+      const owners = new Map<unknown, number>();
+      for (const element of Array.from(g.document.querySelectorAll("input[name], select[name], textarea[name]"))) {
+        const form = (element as NamedControl).form;
+        if (form) owners.set(form, (owners.get(form) ?? 0) + 1);
+      }
+      let best: ControlLike | null = null, most = 0;
+      for (const [form, count] of owners) if (count > most) { best = form as ControlLike; most = count; }
+      if (!best) return null;
+      for (const selector of generic) { const found = best.querySelectorAll(selector); if (found.length) return found[0]; }
+      return null;
+    }, MARKED_SUBMIT_SELECTOR, FORM_SUBMIT_SELECTORS);
+    const control = handle.asElement() as unknown as ClickHandle | null;
+    if (!control) { await handle.dispose(); throw new NothingSentError("submit_control_missing", "The form has no submit control; nothing was sent", false); }
     const timeout = Math.min(this.options.timeoutMs ?? 20_000, 15_000);
     // A native form navigates after the click, while a script-driven one updates in place.
     // Listen for navigation before clicking so a fast one is not missed.
     const navigated = page.waitForNavigation({ waitUntil: "load", timeout }).then(() => true, () => false);
-    await (control as unknown as { click(): Promise<void> }).click();
+    try { await control.click(); } finally { await control.dispose().catch(() => undefined); }
     await Promise.race([navigated, page.waitForNetworkIdle({ idleTime: 600, timeout }).catch(() => undefined)]);
     const read = () => page.evaluate((selectors: { confirmation: string; reference: string }) => {
       const g = globalThis as unknown as FormGlobals;

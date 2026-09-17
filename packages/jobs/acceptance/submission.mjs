@@ -28,7 +28,18 @@ const sha256=value=>createHash('sha256').update(value).digest('hex');
 const resumeText='Ada Lovelace\nEngineer\n- Shipped fixtures\n';
 
 // --- Fixture site that counts what actually arrives --------------------------------------
-const record={prepareCalls:0,submissions:0,lastSubmit:null,rejected:0};
+const record={prepareCalls:0,submissions:0,lastSubmit:null,rejected:0,native:0,lastNative:null,searches:0};
+// A conventional server-rendered form: native POST and a full page navigation on submit, a
+// search form elsewhere on the page, a type-less "Preview" button (which really submits) and a
+// submit input labelled "Review and submit". None of them may be pressed while preparing.
+const NATIVE=`<!doctype html><html><body><header><form action="/search" method="get"><input name="q" aria-label="Search"><button type="submit">Search</button></form></header>
+<h1>Apply</h1><form method="post" action="/native-submit" enctype="multipart/form-data">
+ <label for="name">Name</label><input id="name" name="name" required>
+ <label for="email">Email</label><input id="email" name="email" type="email" required>
+ <label for="resume">Resume</label><input id="resume" name="resume" type="file" required accept=".txt">
+ <button name="preview">Preview</button>
+ <input type="submit" value="Review and submit">
+</form></body></html>`;
 const page=(mode,verdict='submitted')=>`<!doctype html><html><body><h1>Apply</h1><form id="apply">
  <label for="name">Name</label><input id="name" name="name" required>
  <label for="email">Email</label><input id="email" name="email" type="email" required>
@@ -54,6 +65,12 @@ const server=http.createServer(async(request,response)=>{
  if(request.method==='GET'&&url.pathname==='/apply'){response.writeHead(200,{'Content-Type':'text/html'});return response.end(page('confirm'));}
  if(request.method==='GET'&&url.pathname==='/apply-silent'){response.writeHead(200,{'Content-Type':'text/html'});return response.end(page('silent'));}
  if(request.method==='GET'&&url.pathname==='/apply-reject'){response.writeHead(200,{'Content-Type':'text/html'});return response.end(page('confirm','rejected'));}
+ if(request.method==='GET'&&url.pathname==='/native'){response.writeHead(200,{'Content-Type':'text/html'});return response.end(NATIVE);}
+ if(request.method==='GET'&&url.pathname==='/search'){record.searches++;response.writeHead(200,{'Content-Type':'text/html'});return response.end('<p>No results</p>');}
+ if(request.method==='POST'&&url.pathname==='/native-submit'){
+  const raw=await body(request);record.native++;record.lastNative=raw;
+  response.writeHead(200,{'Content-Type':'text/html'});
+  return response.end(`<!doctype html><html><body><p id="confirmation" data-apply-result="submitted">Application received</p><span data-apply-reference>NATIVE-${record.native}</span></body></html>`);}
  if(request.method==='GET'&&url.pathname==='/__record'){response.writeHead(200,{'Content-Type':'application/json'});return response.end(JSON.stringify(record));}
  if(request.method==='POST'&&url.pathname==='/prepare'){const parsed=JSON.parse(await body(request));record.prepareCalls++;response.writeHead(200,{'Content-Type':'text/plain'});return response.end('ok');}
  if(request.method==='POST'&&url.pathname==='/submit'){
@@ -182,6 +199,23 @@ try{
  const rejectedResult=await submit(rejected.attemptId);
  assert.equal(rejectedResult.body.state,'rejected',JSON.stringify(rejectedResult.body));
  assert.equal((await seen()).submissions,3);
+
+ // A native form: preparing never presses a control that could submit, the send presses the
+ // application form's own submit control (not the search form), and the confirmation is read
+ // from the page the click navigated to.
+ const native=await prepare(`${origin}/native`);
+ let nativeSeen=await seen();
+ assert.equal(nativeSeen.native,0,'preparation must not submit a native form through a submit-typed preview control');
+ assert.equal(nativeSeen.searches,0);
+ await approve(native.attemptId);
+ const nativeSent=await submit(native.attemptId);
+ assert.equal(nativeSent.body.state,'submitted',JSON.stringify(nativeSent.body));
+ assert.equal(nativeSent.body.externalId,'NATIVE-1','the confirmation came from the page the submit navigated to');
+ nativeSeen=await seen();
+ assert.equal(nativeSeen.native,1);
+ assert.equal(nativeSeen.searches,0,'the search form elsewhere on the page was never submitted');
+ assert.match(nativeSeen.lastNative,/Ada Lovelace/);
+ assert.match(nativeSeen.lastNative,new RegExp(`filename="resume-${applicationId.slice(0,8)}\\.txt"`));
 
  console.log('submission acceptance: ALL PASS');
 }finally{

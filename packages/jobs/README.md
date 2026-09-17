@@ -206,7 +206,11 @@ data directory; ownership is proven by `--user-data-dir`, so a recycled PID is d
 rather than killed, and a reaped orphan is only reported dead once observed. `form.ts`
 provides the `FormSession` seam and a real Puppeteer session; `fixture-form` fills a real
 form, uploads a named copy of the verified resume, and clicks only the site's own
-non-submitting preview control. Routes: `GET /api/application-adapters`,
+non-submitting preview control (a `<button>`/`<input>` must be explicitly `type="button"`;
+anything that could submit is never pressed while preparing). A send presses an explicitly
+marked submit control, or else the submit control of the form that owns the fields — never
+a search or newsletter form elsewhere on the page — and reads the confirmation from the page
+the click navigated to. Routes: `GET /api/application-adapters`,
 `POST /api/applications/:id/prepare`, `GET /api/applications/:id/package`,
 `POST /api/applications/:id/resolve`, `POST /api/applications/:id/manual-completion`,
 `POST /api/attempts/:id/approve`. Approving binds to one attempt's manifest hash;
