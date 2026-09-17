@@ -1401,3 +1401,40 @@ Approved to proceed; see implementation entries below.
   the required part and already exist): no ntfy transport, no digest cursor, no external
   messages. Automatic tailoring currently starts from the operator, not the queue; wiring
   queue-capacity-aware auto-tailoring belongs with the step-9/10 workflow.
+
+### 2026-09-16 — step 9a complete (application adapter contract and preparation/preflight)
+
+- Branch `step9-application-prep` from `step8-search-filtering`. This checkpoint covers the
+  adapter contract and the preparation/preflight core. Browser automation (dedicated
+  supervised profile, real form filling), the HTTP surface, the review UI and the fixture
+  form server are **9b**, which finishes step 9.
+- `adapters/application.ts` adds `ApplicationAdapter` on the same registry pattern as
+  spawners/sources/invocation (`registerApplicationAdapter` / `createApplicationAdapter` /
+  `applicationAdapterIds`). Capabilities are explicit — `submit` is separate and the
+  fixture reports `submit:false`, so step 9 can never claim submission. A `manual` adapter
+  honestly declares it has no automation rather than pretending; a deterministic `fixture`
+  adapter supplies fields and fault flags from options.
+- `preparation.ts` performs preflight before anything is filled:
+  1. a **complete** posting capture must exist (else `missing_evidence`), be within the
+     freshness window (else `stale_capture`), a resume version must be selected
+     (`missing_resume`), and its text artifact must verify by size/hash (`corrupt_resume`);
+  2. the adapter inspects the form; CAPTCHA or forbidden automation becomes a durable
+     inbox handoff (`captcha` / `forbidden_automation`), never a fill attempt;
+  3. required fields that cannot be filled block as `unsupported_required_fields` with the
+     field names — a partial form is never presented as ready.
+  A successful preparation writes an immutable `application_attempts` draft row with the
+  full manifest (evidence hashes, resume hash/bytes, adapter + version, form URL, fields,
+  filled values, uploads, answers, settings revision) plus a `manifestHash`. The
+  idempotency key is derived from the application, evidence, resume, settings and form, so
+  repeating a preparation reuses the same draft and **creates no duplicate**. A
+  `source_policy` revision is created with `submit:false` when none exists. Blocked and
+  needs-input outcomes drive application state and open an `application-handoff` review
+  item carrying the form URL, answers and resume.
+- Verification (Node 22.23.2, Linux): jobs build/typecheck; 87 jobs tests (5 new:
+  registry honesty, clean draft + idempotent repeat, missing/stale/corrupt evidence blocks,
+  unsupported-required-field block, CAPTCHA/forbidden/manual handoffs). No schema change
+  (the attempt and policy tables already existed); DATABASE.md unchanged.
+- Not in 9a: the dedicated supervised browser + profile and real filling, the HTTP routes,
+  the review screen (posting text/images, resume, answers, diff since review), the fixture
+  form server acceptance, and manual-completion receipts. Those are 9b. Nothing in 9a
+  transmits or submits anything.

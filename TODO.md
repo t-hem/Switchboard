@@ -11,7 +11,9 @@ complete with **placeholder** personas/tools at model
 `openrouter/deepseek/deepseek-v4.1-flash`; 7c added the generic host `idempotencyKey`
 (`POST /sessions`) plus jobs-side rediscovery and superseded-result refusal; step 8 added
 discovery scheduling with paginated checkpoints and explainable, non-converting screening
-(schema 4). Step 9 (application preparation and review package) is next.
+(schema 4). Step 9a added the application-adapter contract and preparation/preflight core
+(evidence checks, blocking rules, immutable draft manifest, handoffs); 9b adds the
+supervised browser, HTTP routes and review UI.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.
@@ -19,9 +21,9 @@ still need) and packages/jobs/DATABASE.md for current code/schema details.
 Stage work happens on branches (a second agent joined; master previously held all
 commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
 `step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`,
-`step7c-provider-registry`, `step7c-spawner-recovery`, `step8-search-filtering`, each
-stacked on the previous. Do not work directly on master; merge a verified stage branch
-when it is reviewable.
+`step7c-provider-registry`, `step7c-spawner-recovery`, `step8-search-filtering`,
+`step9-application-prep`, each stacked on the previous. Do not work directly on master;
+merge a verified stage branch when it is reviewable.
 
 Connectors stay swappable: implement the interface, register the implementation, change
 the setting. No provider branches in workflow code, and Switchboard and the add-ons

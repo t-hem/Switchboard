@@ -181,6 +181,32 @@ optional and not implemented.
 node packages/jobs/acceptance/scheduling.mjs
 ```
 
+## Application preparation (step 9a)
+
+`ApplicationAdapter` is a registry contract like the others (`manual` and a deterministic
+`fixture` are registered; `createApplicationAdapter(id, options)`). Capabilities are
+explicit and **`submit` is separate** — the fixture reports `submit:false`, so preparation
+cannot claim or perform submission. `manual` honestly declares it has no automation.
+
+`PreparationService.prepare()` runs preflight before anything is filled: a complete posting
+capture must exist and be fresh, a resume version must be selected and its artifact must
+verify by size/hash, and required fields that cannot be filled block as
+`unsupported_required_fields` (a partial form is never "ready"). CAPTCHA, forbidden
+automation and a manual-only adapter become durable `application-handoff` inbox items
+carrying the form URL, answers and resume — never a fill attempt. A successful preview
+writes an immutable `application_attempts` draft row with the full manifest and a
+`manifestHash`; the idempotency key is derived from the application, evidence, resume,
+settings and form, so repeating a preparation reuses the same draft and creates no
+duplicate. A `source_policy` revision is created with `submit:false`.
+
+Still 9b: the dedicated supervised browser + profile and real filling, HTTP routes, the
+review screen, the fixture form-server acceptance, and manual-completion receipts. Nothing
+here transmits or submits anything.
+
+```sh
+node --test --import tsx packages/jobs/test/preparation.test.ts
+```
+
 ## Career library and resume rendering (step 6)
 
 Resumes are assembled from the operator's own bullets placed into base templates. All

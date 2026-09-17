@@ -16,8 +16,9 @@ to directly.
   **`step7a-personas-tools`** (step 7a), **`step7b-tailoring-runner`** (step 7b) and
   **`step7c-provider-registry`** (adapter swappability), **`step7c-spawner-recovery`**
   (host idempotency, carries the merged master display fixes) and
-  **`step8-search-filtering`** (scheduling + screening), each stacked on the previous.
-  All push to `origin`.
+  **`step8-search-filtering`** (scheduling + screening) and
+  **`step9-application-prep`** (application adapter + preparation, 9a), each stacked on
+  the previous. All push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -71,7 +72,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–8
+## Jobs stages 2–9a
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -114,6 +115,14 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   triggers the two passes; `GET /api/runs/:id` reads one run; both need a private
   `spawnerToken` in `service.json`. Fake-agent tests cover valid, malformed, missing,
   changed-input, unsupported-fact, nonzero-exit, lost and hung runs.
+- **Step 9a** (verified, on branch `step9-application-prep`): `ApplicationAdapter`
+  registry (honest `manual`, deterministic `fixture`, explicit capabilities with
+  `submit:false`), and `PreparationService` evidence preflight (complete/fresh capture,
+  verified resume), blocking rules (`missing_evidence`/`stale_capture`/`missing_resume`/
+  `corrupt_resume`/`unsupported_required_fields`), an immutable draft attempt manifest
+  with an idempotency key that prevents duplicate preparation, a `source_policy` revision
+  with `submit:false`, and CAPTCHA/forbidden/manual handoffs as durable inbox items. 9b
+  adds the supervised browser, HTTP routes, review UI and fixture form server.
 - **Step 8** (verified, on branch `step8-search-filtering`): discovery scheduling with
   paginated checkpoints (resume after a cap or rate limit), `Retry-After`-aware backoff,
   a restart-safe interval scheduler with a shared lease and bounded cycles, schema-4
@@ -198,9 +207,21 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 9 — application preparation and immutable review package
+## Next: step 9b — supervised browser, form filling, HTTP surface and review UI
 
-Read step 9 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md). Implement one
+The 9a core exists: `ApplicationAdapter` (registry + `manual`/`fixture`),
+`PreparationService` evidence preflight, blocking rules, immutable draft attempt manifest
+with idempotent repeat, and CAPTCHA/forbidden/manual handoffs as inbox items. 9b must add:
+the dedicated supervised browser process + profile with persisted ownership and crash
+cleanup (never the operator's daily browser), real filling/upload against a fixture form
+server (correct fields and exact uploaded file hash, **zero submissions**), the HTTP routes
+(`prepare` / package / resolve), the review screen (posting text/images, selected resume,
+answers, diff since review, source link, agent run), manual-completion receipts, and the
+acceptance that changed posting/answers invalidate a prior approval.
+
+See the previously-planned step 9 text below for details.
+
+PLAN TEXT (context): Implement one
 application-form adapter against fixtures (then a chosen real target), prepare answers
 and an optional cover letter, and build the review screen showing posting evidence,
 selected resume, answers and changes. Stop before submitting. A dedicated supervised
