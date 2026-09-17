@@ -57,6 +57,21 @@ test("a paginated source is checkpointed, resumed and never duplicated", async (
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM applications").get()!.n, 5);
 });
 
+test("a stopping service ends a scan between pages and keeps its checkpoint", async (t) => {
+  const { store, discovery } = fixture(t, { acme: { companyName: "Acme", boardId: "acme",
+    fixture: { pagination: { pageSize: 2 }, postings: [1, 2, 3, 4, 5].map(n => job(`j${n}`)) } } });
+  const stopping = new AbortController();
+  const first = discovery.run("acme", { settingsRevision: 1, cap: 10, signal: stopping.signal });
+  stopping.abort();
+  const outcome = await first;
+  assert.equal(outcome.complete, false);
+  const run = store.db.prepare("SELECT state,error_json FROM search_runs WHERE id=?").get(outcome.searchRunId)!;
+  assert.equal(run.state, "blocked", "an interrupted scan is resumable, not failed or left running");
+  assert.equal(JSON.parse(String(run.error_json)).code, "stopped");
+  const resumed = await discovery.run("acme", { settingsRevision: 1, cap: 10, resume: true });
+  assert.equal(outcome.discovered + resumed.discovered, 5, "the next run resumes where the stop left off");
+});
+
 test("a rate limit is retried with the stated backoff and then succeeds", async (t) => {
   const { discovery } = fixture(t, { acme: { companyName: "Acme", boardId: "acme",
     fixture: { rateLimit: { firstAttempts: 1, retryAfterMs: 1 }, postings: [job("a"), job("b")] } } });
