@@ -82,7 +82,7 @@ export class PuppeteerFormSession implements FormSession {
       const el = g.document.querySelector(selector) as unknown as ControlLike | null;
       if (!el) return false;
       const tagName = el.tagName.toLowerCase(), type = (el.getAttribute("type") ?? "").toLowerCase();
-      if (tagName === "input" && (type === "checkbox" || type === "radio")) el.checked = val === "true" || val === "yes" || val === "1";
+      if (tagName === "input" && (type === "checkbox" || type === "radio")) el.checked = val === "true"; // the adapter normalizes checkbox answers to "true"/"false"
       else el.value = val;
       // Frameworks listen for these events; setting `.value` alone is invisible to them.
       el.dispatchEvent(new g.Event("input", { bubbles: true }));

@@ -110,12 +110,32 @@ export class FixtureApplicationAdapter implements ApplicationAdapter {
       }
       const raw = input.answers[field.name];
       if (raw === undefined || raw === "") { if (field.required) missing.push(field.name); continue; }
-      if (field.type === "select" && field.options && !field.options.includes(raw)) { missing.push(field.name); continue; }
-      filled.push({ field: field.name, value: raw });
+      const value = fillValue(field, raw);
+      if (value === null) { missing.push(field.name); continue; }
+      filled.push({ field: field.name, value });
     }
     return { filled, uploads, missing };
   }
   async submit(): Promise<SubmitOutcome> { throw new AppError("unsupported_capability", "The fixture adapter prepares in process and never sends", 409); }
+}
+
+/**
+ * A checkbox answer as the page must show it: "true" or "false". Anything else is not a
+ * readable yes/no and is left unfilled rather than guessed.
+ */
+export function checkboxValue(raw: string): "true" | "false" | null {
+  const value = raw.trim().toLowerCase();
+  if (["true", "yes", "y", "1", "on", "checked"].includes(value)) return "true";
+  if (["false", "no", "n", "0", "off", "unchecked"].includes(value)) return "false";
+  return null;
+}
+/** The value to fill for a field, or null when the answer cannot satisfy it. */
+function fillValue(field: FormField, raw: string): string | null {
+  if (field.type === "select") return field.options && !field.options.includes(raw) ? null : raw;
+  if (field.type !== "checkbox") return raw;
+  const checked = checkboxValue(raw);
+  // A required checkbox (a consent, say) answered "no" cannot produce a valid form.
+  return checked === null || (field.required && checked === "false") ? null : checked;
 }
 
 type Factory = (options?: Record<string, unknown>) => ApplicationAdapter;
@@ -134,9 +154,10 @@ async function fillLiveForm(session: FormSession, fields: FormField[], answers: 
     }
     const raw = answers[field.name];
     if (raw === undefined || raw === "") { if (field.required) intended.missing.push(field.name); continue; }
-    if (field.type === "select" && field.options && !field.options.includes(raw)) { intended.missing.push(field.name); continue; }
-    await session.fill(field.name, field.type === "checkbox" ? "true" : raw);
-    intended.filled.push({ field: field.name, value: raw });
+    const value = fillValue(field, raw);
+    if (value === null) { intended.missing.push(field.name); continue; }
+    await session.fill(field.name, value);
+    intended.filled.push({ field: field.name, value });
   }
   return intended;
 }

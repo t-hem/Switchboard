@@ -59,6 +59,28 @@ test("preparing fills the form, uploads the exact file, and only previews", asyn
   assert.equal(prepared.uploads[0]!.artifactHash, file.artifactHash);
 });
 
+test("a checkbox is filled with the operator's answer, never ticked by default", async () => {
+  const consent: FormField = { name: "consent", label: "I agree", type: "checkbox", required: true };
+  const withConsent = [...fields, consent];
+  const inspection = { formUrl: "u", finalUrl: "u", fields: withConsent, captcha: false, automationForbidden: false };
+  const answers = { name: "Ada", workAuth: "yes", consent: "yes" };
+
+  const declined = new FakeSession();
+  const prepared = await adapter.prepare({ inspection, answers: { ...answers, remote: "no" }, resume: file }, context(declined));
+  assert.deepEqual(declined.fills.find(([field]) => field === "remote"), ["remote", "false"], "an answer of no must leave the box unticked");
+  assert.deepEqual(declined.fills.find(([field]) => field === "consent"), ["consent", "true"]);
+  assert.deepEqual(prepared.missing, []);
+
+  const unreadable = await adapter.prepare({ inspection, answers: { ...answers, remote: "sometimes" }, resume: file }, context(new FakeSession()));
+  assert.deepEqual(unreadable.missing, ["remote"], "a value that is not a yes/no is not guessed");
+  const refused = await adapter.prepare({ inspection, answers: { ...answers, consent: "no" }, resume: file }, context(new FakeSession()));
+  assert.deepEqual(refused.missing, ["consent"], "a required box answered no cannot make a valid form");
+
+  const fixture = createApplicationAdapter("fixture", { fields: withConsent });
+  const offline = await fixture.prepare({ inspection, answers: { ...answers, remote: "No" }, resume: file }, context());
+  assert.deepEqual(offline.filled.find(entry => entry.field === "remote"), { field: "remote", value: "false" });
+});
+
 test("an unfillable required field never triggers a preview", async () => {
   const session = new FakeSession();
   const inspection = await adapter.inspect("https://forms.example/apply", context(session));
