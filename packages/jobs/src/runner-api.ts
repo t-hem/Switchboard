@@ -18,13 +18,15 @@ import { createSpawner } from "./adapters/spawner.js";
  */
 export function runnerRoutes(app: FastifyInstance, store: SettingsStore, dir: string, config: ServiceConfig): void {
   const db = store.db;
-  let runner: TailoringRunner | null = null;
+  // Rebuilt whenever settings change, so a new spawner, adapter or persona directory takes
+  // effect on the next run without a restart. A run already in flight keeps its own runner.
+  let cached: { revision: number; runner: TailoringRunner } | null = null;
   const build = (): TailoringRunner => {
     if (!config.spawnerToken) throw new AppError("spawner_unconfigured", "A host token is not configured in service.json; tailoring cannot spawn", 409);
-    if (runner) return runner;
-    const settings = store.current().value;
+    const { revision, value: settings } = store.current();
+    if (cached?.revision === revision) return cached.runner;
     const artifacts = new ArtifactStore(db, dir);
-    runner = new TailoringRunner({
+    const runner = new TailoringRunner({
       db, artifacts, library: new Library(db), renderer: new ResumeRenderer(db, artifacts, new Library(db)),
       queue: new TaskQueue(db), reviews: new Reviews(db), personasDir: settings.personaDirectory,
       // Provider and invocation adapter come from settings; swapping either is a settings change.
@@ -32,6 +34,7 @@ export function runnerRoutes(app: FastifyInstance, store: SettingsStore, dir: st
       invocation: createInvocationAdapter(settings.spawner.invocationAdapter ?? "pi"), dataDir: dir,
       spawnerProvider: settings.spawner.provider, spawnerInstance: settings.spawner.baseUrl,
     });
+    cached = { revision, runner };
     return runner;
   };
 

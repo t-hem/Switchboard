@@ -314,6 +314,27 @@ test("tailoring routes report an unconfigured spawner and unknown runs", async (
   assert.equal((await app.inject({ url: "/api/settings", method: "PUT", headers, payload: { expectedRevision: current.revision, value: good } })).statusCode, 200);
 });
 
+test("a settings change reaches the next tailoring run without a restart", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-runner-settings-"));
+  const store = new SettingsStore(path.join(dir, "jobs.sqlite"));
+  const app = buildServer({ port: 7791, token: "runner-fixture-token", allowedOrigins: [], spawnerToken: "host-token-for-tests" }, store, dir);
+  t.after(async () => { await app.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const headers = { authorization: "Bearer runner-fixture-token" };
+  const seen: string[] = [];
+  registerSpawnerProvider("settings-probe", options => { seen.push(options.baseUrl); return { provider: "settings-probe", health: async () => ({ available: true }), list: async () => [], inspect: async () => null }; });
+  const save = async (baseUrl: string) => {
+    const current = (await app.inject({ url: "/api/settings", headers })).json();
+    const value = structuredClone(current.value); value.spawner.provider = "settings-probe"; value.spawner.baseUrl = baseUrl;
+    assert.equal((await app.inject({ url: "/api/settings", method: "PUT", headers, payload: { expectedRevision: current.revision, value } })).statusCode, 200);
+  };
+  const tailor = () => app.inject({ url: "/api/tailoring", method: "POST", headers, payload: { applicationId: "a", jobSnapshotId: "s", profileRevisionId: "p", templateRevisionId: "t" } });
+  await save("http://127.0.0.1:7777");
+  await tailor(); await tailor();
+  await save("http://127.0.0.1:8888");
+  await tailor();
+  assert.deepEqual(seen, ["http://127.0.0.1:7777", "http://127.0.0.1:8888"], "built once per settings revision");
+});
+
 test("line diff marks added and removed prose", () => {
   const diff = lineDiff("a\nb\nc", "a\nB\nc");
   assert.deepEqual(diff.filter(line => line.type !== "same").map(line => line.type).sort(), ["add", "remove"]);
