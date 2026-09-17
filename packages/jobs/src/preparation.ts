@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { SettingsStore } from "./store.js";
 import { transaction } from "./database.js";
@@ -79,7 +81,7 @@ export class PreparationService {
       if (inspection.automationForbidden) return this.#handoff(input, adapter, "forbidden_automation", "Automation is not permitted for this target", snapshot, resumeId, inspection.formUrl);
 
       const resumeUpload: FileUpload = { field: "resume", artifactHash: String(resume["text_artifact_hash"]), filename: resumeFilename(String(application["id"])),
-        mimeType: "text/plain", localPath: this.deps.artifacts.localPath(String(resume["text_artifact_hash"])) };
+        mimeType: "text/plain", localPath: this.#stageResume(String(application["id"]), resumeBytes) };
       const prepared = await adapter.prepare({ inspection, answers: input.answers, resume: resumeUpload }, context);
       if (prepared.missing.length) return blocked("unsupported_required_fields", `Required fields could not be filled: ${prepared.missing.join(", ")}`);
 
@@ -110,6 +112,19 @@ export class PreparationService {
       // The supervised browser session never outlives one preparation.
       await session?.close().catch(() => undefined);
     }
+  }
+
+  /**
+   * The artifact store is content-addressed, so a raw artifact path would present the site
+   * a file named after its digest. Stage a verified copy under the application's own name
+   * and upload that; the manifest still records the artifact hash the bytes must match.
+   */
+  #stageResume(applicationId: string, bytes: Buffer): string {
+    const directory = path.join(this.deps.artifacts.root, "uploads");
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const file = path.join(directory, resumeFilename(applicationId));
+    fs.writeFileSync(file, bytes, { mode: 0o600 });
+    return file;
   }
 
   #idempotencyKey(input: { applicationId: string; adapterId: string; formUrl: string; answers: Record<string, string>; settingsRevision: number },
