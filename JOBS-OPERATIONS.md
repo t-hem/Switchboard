@@ -158,8 +158,14 @@ node packages/jobs/dist/data-cli.js reconstruct /path/to/export
   however recently, and becomes `unknown` with a reconciliation inbox item. Before each send,
   attempts stuck in `submitting` for more than ten minutes are swept the same way. Run one jobs
   service per data directory.
-- Queue repair (`POST /api/queue/repair`) releases expired leases back to the queue but turns
-  an interrupted submission into an explicit `unknown` — never a silent retry.
+- The worker holds the single scheduler lease. When the service starts it blocks whatever the
+  previous process was running, then reconciles those tailoring stages against the host: an
+  unreachable host changes nothing, a still-running agent is waited on, a finished agent's
+  valid result is accepted, and a dead one is retried from its saved inputs (two attempts at
+  most). Stopping the service never kills an agent session.
+- Queue repair (`POST /api/queue/repair`) blocks tasks whose lease expired so the worker can
+  reconcile their agents (it never re-queues them blindly) and turns an interrupted submission
+  into an explicit `unknown` — never a silent retry.
 
 ## Upgrades
 

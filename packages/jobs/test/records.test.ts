@@ -134,7 +134,7 @@ test("health names missing artifacts, low disk, leftovers and a missing backup",
   assert.ok(healthOf(f.db, f.dir, { artifacts: f.artifacts, now: () => NOW }).problems.some(problem => problem.code === "artifact_unreferenced"));
 });
 
-test("repair releases expired leases and makes an interrupted submission explicitly unknown", (t) => {
+test("repair blocks expired leases for reconciliation and makes an interrupted submission explicitly unknown", (t) => {
   const f = fixture(t);
   const queue = new TaskQueue(f.db);
   const stale = queue.enqueue({ kind: "discovery:run", input: {}, settingsRevision: f.store.current().revision }, NOW);
@@ -147,7 +147,8 @@ test("repair releases expired leases and makes an interrupted submission explici
   const result = repairQueue(f.db, { now: () => NOW });
   assert.deepEqual(result.releasedLeases, [stale.id]);
   assert.deepEqual(result.unconfirmed, [veryStuck.id]);
-  assert.equal(f.db.prepare("SELECT state FROM tasks WHERE id=?").get(stale.id)!.state, "queued", "an expired lease returns to the queue");
+  assert.equal(f.db.prepare("SELECT state FROM tasks WHERE id=?").get(stale.id)!.state, "blocked", "an expired lease is never re-queued: its child may still be running");
+  assert.equal(JSON.parse(String(f.db.prepare("SELECT error_json FROM tasks WHERE id=?").get(stale.id)!.error_json)).code, "reconciliation_required");
   assert.equal(Number(f.db.prepare("SELECT fence FROM tasks WHERE id=?").get(stale.id)!.fence), stale.fence + 1);
   assert.equal(f.db.prepare("SELECT state FROM tasks WHERE id=?").get(veryStuck.id)!.state, "unknown", "an interrupted submission is never silently retried");
   assert.equal(f.db.prepare("SELECT state FROM tasks WHERE id=?").get(fresh.id)!.state, "submitting", "a live lease is left alone");

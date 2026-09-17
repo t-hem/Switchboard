@@ -36,8 +36,8 @@ refuses loopback/private/link-local targets for both fetching and browser naviga
 only an isolated local fixture should set it true.
 
 `spawnerToken` is the **host** bearer token, kept only in this private file. It is
-required for tailoring: `POST /api/tailoring` spawns agent sessions through the host
-and `GET /api/runs/:id` reads a run. Without it those routes return 409
+required for tailoring: `POST /api/tailoring` queues the stages whose agent sessions the
+worker spawns through the host, and `GET /api/runs/:id` reads a run. Without it those routes return 409
 `spawner_unconfigured`. The token is never returned to a client and never enters
 settings or exports.
 
@@ -224,8 +224,8 @@ operator's explicit outcome and never resends. `GET|PUT /api/policies` manages a
 per-site revisions (permit/forbid submission, automatic opt-in, daily cap).
 
 `GET /api/health` reports storage health and every known gap (including "no backup has ever
-been recorded"); `POST /api/queue/repair` releases expired leases but never retries an
-interrupted submission. `GET /api/applications/:id/record` is the complete record and
+been recorded"); `POST /api/queue/repair` blocks tasks whose lease expired for reconciliation (their agent
+child may still be running) and never retries an interrupted submission. `GET /api/applications/:id/record` is the complete record and
 `POST /api/applications/:id/export` writes a self-contained directory that
 `node packages/jobs/dist/data-cli.js reconstruct <dir>` verifies with no database and no
 service. `data-cli.js` also has `health`, `export-application` and
@@ -305,7 +305,19 @@ model cannot call the tools, and a prompt-only tool list is not an enforced rest
 Placeholders ship in `packages/jobs/personas/`; the live copies are machine-local under
 `~/.switchboard/personas/` and are never fleet-synced.
 
-`src/runner.ts` performs the two passes: it snapshots the persona into `agent_runs`,
+`src/worker.ts` is the service's single background worker. It holds the one scheduler
+lease, runs discovery on its interval, and claims queued tasks one at a time — claims are
+refused while jobs are disabled or paused. `POST /api/tailoring` queues the assembly stage;
+an accepted assembly queues the edit stage. Each stage runs under a task lease that is
+heartbeated while the agent runs and checked again before its result is accepted, so a
+cancelled or recovered stage never takes a late result. Stopping the service never kills an
+agent. On start, a new lease generation blocks everything the previous worker was running,
+and each pass reconciles those stages: an unreachable host changes nothing, a live child is
+waited on, a finished child's valid result is accepted without spawning again, and a dead or
+unusable one is retried from the stage's saved inputs (a new run and session key, at most two
+attempts).
+
+`src/runner.ts` performs each stage: it snapshots the persona into `agent_runs`,
 writes a `0700` run directory and task file, passes the invocation argv through the
 host's literal `extraArgs`, polls retained exit state to a deadline, validates the
 result against the run's exact snapshot/profile/template revisions (`src/agent-result.ts`:

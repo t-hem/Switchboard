@@ -120,8 +120,9 @@ node packages/jobs/acceptance/personas.mjs
 `src/runner.ts` now creates tracked agent runs, passes the invocation argv through the
 host's literal `extraArgs`, polls retained exit state, validates the result against the
 run's exact revisions and persists the build/edit resume versions plus tool events,
-messages and a review item. `POST /api/tailoring` triggers the two passes in the
-background; `GET /api/runs/:id` shows one run. Both require a private `spawnerToken` in
+messages and a review item. `POST /api/tailoring` queues the assembly stage for the
+service worker, which queues the edit stage once assembly is accepted (see the worker
+section of README.md for leases and crash recovery); `GET /api/runs/:id` shows one run. Both require a private `spawnerToken` in
 `service.json` (the host token); without it the route reports `spawner_unconfigured`.
 
 **The remaining blocker for a real run is still item 4 above — the tool bridge.** The

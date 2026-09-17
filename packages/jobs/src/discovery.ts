@@ -43,7 +43,8 @@ export class Discovery {
     try { return JSON.parse(String(row["checkpoint_json"])); } catch { return null; }
   }
 
-  async run(sourceId: string, options: { settingsRevision: number; cap?: number; maxRetries?: number; resume?: boolean }): Promise<DiscoveryOutcome> {
+  /** `signal` stops a scan between pages (service shutdown); it ends blocked with its checkpoint. */
+  async run(sourceId: string, options: { settingsRevision: number; cap?: number; maxRetries?: number; resume?: boolean; signal?: AbortSignal }): Promise<DiscoveryOutcome> {
     const source = this.sources.get(sourceId);
     if (!source) throw new AppError("source_missing", "Source not found", 404);
     if (!source.enabled) throw new AppError("source_disabled", "Enable this source before running discovery", 409);
@@ -62,6 +63,7 @@ export class Discovery {
     try {
       let complete = false, stopReason: string | null = null;
       while (pages < MAX_PAGES_PER_RUN) {
+        if (options.signal?.aborted) { stopReason = "stopped"; break; }
         const remaining = cap === Infinity ? undefined : Math.max(0, cap - discovered);
         if (remaining === 0) { stopReason = "cap_reached"; break; }
         const result = await withRetries(maxRetries, attempt =>

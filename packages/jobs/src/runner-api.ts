@@ -1,34 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import type { Services } from "./services.js";
 import { AppError } from "./errors.js";
-import { TailoringRunner } from "./runner.js";
-import { createInvocationAdapter } from "./invocation.js";
-import { createSpawner } from "./adapters/spawner.js";
+import { enqueueTailoring } from "./runner.js";
 
 /**
- * Operator-triggered tailoring and run diagnostics. The runner is created lazily and only
- * when a private host token is configured; without it the route reports the missing
- * capability instead of attempting a spawn. A real worker/scheduler wires this in step 8.
+ * Operator-triggered tailoring and run diagnostics. `POST /api/tailoring` queues the assembly
+ * stage; the service's worker claims it (only while jobs are enabled and unpaused), runs it
+ * under a fenced lease, and queues the edit stage after it. Without a private host token the
+ * route reports the missing capability instead of queueing work that could never spawn.
  */
-export function runnerRoutes(app: FastifyInstance, { store, db, dir, config, artifacts, library, renderer, queue, reviews }: Services): void {
-  // Rebuilt whenever settings change, so a new spawner, adapter or persona directory takes
-  // effect on the next run without a restart. A run already in flight keeps its own runner.
-  let cached: { revision: number; runner: TailoringRunner } | null = null;
-  const build = (): TailoringRunner => {
-    if (!config.spawnerToken) throw new AppError("spawner_unconfigured", "A host token is not configured in service.json; tailoring cannot spawn", 409);
-    const { revision, value: settings } = store.current();
-    if (cached?.revision === revision) return cached.runner;
-    const runner = new TailoringRunner({
-      db, artifacts, library, renderer, queue, reviews, personasDir: settings.personaDirectory,
-      // Provider and invocation adapter come from settings; swapping either is a settings change.
-      spawner: createSpawner(settings.spawner.provider, { baseUrl: settings.spawner.baseUrl, token: config.spawnerToken }),
-      invocation: createInvocationAdapter(settings.spawner.invocationAdapter ?? "pi"), dataDir: dir,
-      spawnerProvider: settings.spawner.provider, spawnerInstance: settings.spawner.baseUrl,
-    });
-    cached = { revision, runner };
-    return runner;
-  };
-
+export function runnerRoutes(app: FastifyInstance, { store, db, config, now, queue }: Services): void {
   app.get<{ Params: { id: string } }>("/api/runs/:id", async req => {
     const run = db.prepare("SELECT * FROM agent_runs WHERE id=?").get(req.params.id);
     if (!run) throw new AppError("run_missing", "Agent run not found", 404);
@@ -43,10 +24,10 @@ export function runnerRoutes(app: FastifyInstance, { store, db, dir, config, art
       properties: { applicationId: { type: "string", minLength: 1 }, jobSnapshotId: { type: "string", minLength: 1 },
         profileRevisionId: { type: "string", minLength: 1 }, templateRevisionId: { type: "string", minLength: 1 } } } },
   }, async req => {
-    const started = build();
-    const settingsRevision = store.current().revision;
-    // Fire-and-forget: the run is tracked in agent_runs and its outcome is a review item.
-    void started.runTwoPass({ ...req.body, settingsRevision }).catch(() => undefined);
-    return { started: true, ...req.body, settingsRevision };
+    if (!config.spawnerToken) throw new AppError("spawner_unconfigured", "A host token is not configured in service.json; tailoring cannot spawn", 409);
+    const { revision, value: settings } = store.current();
+    const task = enqueueTailoring(queue, req.body, revision, now?.());
+    const dispatch = !settings.enabled ? "waits until jobs are enabled" : settings.paused ? "waits until jobs are unpaused" : "the worker will start it shortly";
+    return { queued: true, taskId: task.id, state: task.state, dispatch, ...req.body, settingsRevision: revision };
   });
 }

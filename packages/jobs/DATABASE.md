@@ -129,10 +129,11 @@ privileged external process modifying files.
 
 ## Queue ownership, recovery and submission uncertainty
 
-`src/queue.ts` is a storage primitive; no scheduler timer/worker dispatch is installed.
-The service still reports `dispatchAvailable=false`. Step 7 wires process inventory
-and execution to these methods. Future startup order is: acquire scheduler lease,
-reconcile recorded spawner children, recover expired tasks, then dispatch eligible work.
+`src/queue.ts` holds these primitives and `src/worker.ts` drives them. The worker's order on
+each start is: acquire the scheduler lease (a new generation), recover — block every task a
+previous owner was running, fencing its lease — then reconcile those tasks' recorded spawner
+children, and only then dispatch eligible queued work. Nothing a dead worker was running is
+dispatched again before its child has been checked.
 
 1. Acquire the `main` scheduler lease transactionally. Each replacement increments its
    generation. Even the same owner must explicitly renew rather than reacquire a live

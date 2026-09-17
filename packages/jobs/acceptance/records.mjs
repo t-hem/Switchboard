@@ -140,10 +140,14 @@ try{
  health=(await api(base,'/api/health')).body;
  assert.deepEqual(health.problems.filter(p=>p.severity==='error'),[],'the store is healthy again once the artifact is restored');
 
- // Repair releases the stale lease and refuses to retry the interrupted submission.
+ // The worker's startup recovery already blocked the dead owner's task for reconciliation and
+ // made the interrupted submission unknown, so the manual repair has nothing left to do.
+ await until(async()=>(await api(base,`/api/tasks/${stale.id}`)).body.task.state==='blocked','worker recovery');
+ assert.equal(JSON.parse((await api(base,`/api/tasks/${stale.id}`)).body.task.error_json).code,'reconciliation_required');
+ assert.equal((await api(base,`/api/tasks/${interrupted.id}`)).body.task.state,'unknown','an interrupted submission is never retried');
  const repaired=await api(base,'/api/queue/repair',{});
- assert.deepEqual(repaired.body.releasedLeases,[stale.id]);
- assert.deepEqual(repaired.body.unconfirmed,[interrupted.id]);
+ assert.deepEqual(repaired.body.releasedLeases,[]);
+ assert.deepEqual(repaired.body.unconfirmed,[]);
 
  // A read-only restore in a clean directory never dispatches anything.
  const archive=path.join(root,'archive');

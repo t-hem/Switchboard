@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { ArtifactStore } from "./artifacts.js";
+import { transaction } from "./database.js";
 
 export type Problem = { code: string; severity: "info" | "warn" | "error"; detail: string };
 export type Health = { status: "ok" | "degraded" | "failed"; checkedAt: string; dataDirectory: string; readOnly: boolean;
@@ -53,7 +54,7 @@ export function healthOf(db: DatabaseSync, dir: string, options: { artifacts?: A
     .map(row => [String((row as Record<string, unknown>)["state"]), Number((row as Record<string, unknown>)["n"])]));
   const staleLeases = count(db, "SELECT count(*) AS n FROM tasks WHERE state='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)", now());
   if (staleLeases) problems.push({ code: "queue_stale_lease", severity: "warn",
-    detail: `${staleLeases} task(s) hold an expired lease; run a repair to return them to the queue` });
+    detail: `${staleLeases} task(s) hold an expired lease; run a repair to block them for reconciliation` });
   const unconfirmedSubmissions = count(db, "SELECT count(*) AS n FROM application_attempts WHERE state='unknown'");
   if (unconfirmedSubmissions) problems.push({ code: "submission_unconfirmed", severity: "warn",
     detail: `${unconfirmedSubmissions} submission(s) await operator reconciliation; nothing is retried automatically` });
@@ -91,31 +92,35 @@ export function healthOf(db: DatabaseSync, dir: string, options: { artifacts?: A
 }
 
 /**
- * Queue repair. It releases expired leases back to the queue, and refuses to guess at an
- * interrupted submission: those become explicitly unknown and wait for a human.
+ * Queue repair for work whose worker is gone. An expired preparation lease is blocked for
+ * reconciliation, never re-queued: its agent child may still be running, and the worker
+ * reattaches or retries it only after checking. An interrupted submission is never guessed
+ * at: it becomes explicitly unknown and waits for a human.
  */
 export function repairQueue(db: DatabaseSync, options: { now?: () => number; submissionGraceMs?: number } = {}): { releasedLeases: string[]; unconfirmed: string[]; left: number } {
   const now = options.now ?? Date.now;
   const graceMs = options.submissionGraceMs ?? 10 * 60 * 1000;
   const time = new Date(now()).toISOString();
-  const stale = db.prepare("SELECT id,effect_class FROM tasks WHERE state='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)").all(now()) as Record<string, unknown>[];
-  const releasedLeases: string[] = [];
-  for (const task of stale) {
-    const id = String(task["id"]);
-    db.prepare(`UPDATE tasks SET state='queued', fence=fence+1, lease_owner=NULL, scheduler_generation=NULL, lease_expires_at=NULL,
-      error_json=?, updated_at=? WHERE id=? AND state='running'`).run(JSON.stringify({ code: "lease_expired", message: "Released by operator repair; the task will be claimed again" }), time, id);
-    releasedLeases.push(id);
-  }
-  const cutoff = new Date(now() - graceMs).toISOString();
-  const stuck = db.prepare("SELECT id FROM tasks WHERE state='submitting' AND updated_at < ?").all(cutoff) as Record<string, unknown>[];
-  const unconfirmed: string[] = [];
-  for (const task of stuck) {
-    const id = String(task["id"]);
-    // A submission that may have been sent is never silently retried.
-    db.prepare("UPDATE tasks SET state='unknown', fence=fence+1, lease_owner=NULL, lease_expires_at=NULL, error_json=?, updated_at=? WHERE id=? AND state='submitting'")
-      .run(JSON.stringify({ code: "submission_unconfirmed", message: "The outcome must be reconciled before this task can run again" }), time, id);
-    unconfirmed.push(id);
-  }
-  const left = count(db, "SELECT count(*) AS n FROM tasks WHERE state IN('running','submitting')");
-  return { releasedLeases, unconfirmed, left };
+  return transaction(db, () => {
+    const stale = db.prepare("SELECT id FROM tasks WHERE state='running' AND (lease_expires_at IS NULL OR lease_expires_at < ?)").all(now()) as Record<string, unknown>[];
+    const releasedLeases: string[] = [];
+    for (const task of stale) {
+      const id = String(task["id"]);
+      db.prepare(`UPDATE tasks SET state='blocked', fence=fence+1, lease_owner=NULL, scheduler_generation=NULL, lease_expires_at=NULL,
+        error_json=?, updated_at=? WHERE id=? AND state='running'`).run(JSON.stringify({ code: "reconciliation_required", message: "Released by operator repair; its agent child is reconciled before any retry" }), time, id);
+      releasedLeases.push(id);
+    }
+    const cutoff = new Date(now() - graceMs).toISOString();
+    const stuck = db.prepare("SELECT id FROM tasks WHERE state='submitting' AND updated_at < ?").all(cutoff) as Record<string, unknown>[];
+    const unconfirmed: string[] = [];
+    for (const task of stuck) {
+      const id = String(task["id"]);
+      // A submission that may have been sent is never silently retried.
+      db.prepare("UPDATE tasks SET state='unknown', fence=fence+1, lease_owner=NULL, scheduler_generation=NULL, lease_expires_at=NULL, error_json=?, updated_at=? WHERE id=? AND state='submitting'")
+        .run(JSON.stringify({ code: "submission_unconfirmed", message: "The outcome must be reconciled before this task can run again" }), time, id);
+      unconfirmed.push(id);
+    }
+    const left = count(db, "SELECT count(*) AS n FROM tasks WHERE state IN('running','submitting')");
+    return { releasedLeases, unconfirmed, left };
+  });
 }

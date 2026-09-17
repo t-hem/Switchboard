@@ -3,7 +3,7 @@ import type { SettingsStore } from "./store.js";
 import type { SourceRow, Sources } from "./sources.js";
 import type { SourceConfig } from "./adapters/source.js";
 import type { Discovery, DiscoveryOutcome } from "./discovery.js";
-import type { TaskQueue } from "./queue.js";
+import type { SchedulerLease, TaskQueue } from "./queue.js";
 
 export const DEFAULT_INTERVAL_MINUTES = 360;
 export const MAX_SOURCES_PER_RUN = 5;
@@ -72,9 +72,16 @@ export class DiscoveryScheduler {
   private readonly now: () => number;
   private running = false;
   private timer: NodeJS.Timeout | undefined;
+  private sharedLease: (() => SchedulerLease | null) | null = null;
   constructor(private readonly deps: { store: SettingsStore; sources: Sources; discovery: Discovery; queue: TaskQueue; owner: string; now?: () => number }) {
     this.now = deps.now ?? Date.now;
   }
+
+  /**
+   * Run under a lease the worker already holds and renews, instead of acquiring and releasing
+   * one per cycle. Without it (tests, a service with no worker) each cycle takes its own lease.
+   */
+  useLease(provider: () => SchedulerLease | null): void { this.sharedLease = provider; }
 
   status(): SchedulerStatus { return schedulerStatus(this.deps.store, this.deps.sources.db, this.now()); }
 
@@ -88,25 +95,27 @@ export class DiscoveryScheduler {
     return ids.map(id => this.deps.sources.get(id)).filter((source): source is SourceRow => source !== null);
   }
 
-  async runOnce(options: { force?: boolean } = {}): Promise<CycleSummary> {
+  async runOnce(options: { force?: boolean; signal?: AbortSignal } = {}): Promise<CycleSummary> {
     const now = this.now();
     const ranAt = new Date(now).toISOString();
     const settingsRevision = this.deps.store.current().revision;
     const settings = this.deps.store.current().value;
     if (!settings.enabled) return { state: "disabled", ranAt, results: [] };
     if (settings.paused) return { state: "paused", ranAt, results: [] };
-    const lease = this.deps.queue.acquireScheduler(this.deps.owner, LEASE_MS, now);
+    const shared = this.sharedLease;
+    const lease = shared ? shared() : this.deps.queue.acquireScheduler(this.deps.owner, LEASE_MS, now);
     if (!lease) return { state: "locked", ranAt, results: [] };
     const results: CycleSummary["results"] = [];
     try {
       for (const source of this.due(options.force === true).slice(0, MAX_SOURCES_PER_RUN)) {
-        this.deps.queue.renewScheduler(lease, LEASE_MS, this.now());
+        if (options.signal?.aborted) break;
+        if (!shared) this.deps.queue.renewScheduler(lease, LEASE_MS, this.now());
         try {
           const outcome = await this.deps.discovery.run(source.id, {
             settingsRevision,
             cap: source.config.requests?.maxPostingsPerRun ?? DEFAULT_MAX_POSTINGS_PER_RUN,
             maxRetries: source.config.requests?.maxRetries,
-            resume: true,
+            resume: true, signal: options.signal,
           });
           results.push({ sourceId: source.id, outcome });
         } catch (error) {
@@ -115,7 +124,7 @@ export class DiscoveryScheduler {
         }
       }
     } finally {
-      this.deps.queue.releaseScheduler(lease, this.now());
+      if (!shared) this.deps.queue.releaseScheduler(lease, this.now());
     }
     return { state: "ran", ranAt, results };
   }

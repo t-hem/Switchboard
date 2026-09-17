@@ -19,11 +19,16 @@ import { SubmissionService } from "./submission.js";
 import { Records } from "./records.js";
 import { Screening } from "./screening.js";
 import { DiscoveryScheduler } from "./scheduler.js";
+import { TailoringRunner, type TailoringDeps } from "./runner.js";
+import { createInvocationAdapter } from "./invocation.js";
+import { createSpawner } from "./adapters/spawner.js";
 import "./adapters/greenhouse.js";
 import "./adapters/fixture.js";
 
 /** Test and wiring seams; anything absent is built from the service configuration. */
-export type ServiceDeps = { http?: HttpClient; capture?: CaptureService | null; now?: () => number; browser?: SupervisedBrowser; createSession?: () => FormSession };
+export type ServiceDeps = { http?: HttpClient; capture?: CaptureService | null; now?: () => number; browser?: SupervisedBrowser; createSession?: () => FormSession;
+  /** Polling and deadline overrides for the tailoring runner. */
+  tailoring?: Pick<TailoringDeps, "sleep" | "pollMs" | "timeoutMs">; };
 
 /**
  * One instance of each service per jobs process, shared by the HTTP routes and the
@@ -41,10 +46,29 @@ export function createServices(config: ServiceConfig, store: SettingsStore, dir:
   const discovery = new Discovery(db, sources, postings, artifacts, http, now);
   const queue = new TaskQueue(db);
   const library = new Library(db, now);
+  const reviews = new Reviews(db);
+  const renderer = new ResumeRenderer(db, artifacts, library, now);
+  // Rebuilt whenever settings change, so a new spawner, adapter or persona directory takes
+  // effect on the next run without a restart. A run already in flight keeps its own runner.
+  let tailoringCache: { revision: number; runner: TailoringRunner } | null = null;
+  const tailoring = (): TailoringRunner | null => {
+    if (!config.spawnerToken) return null;
+    const { revision, value: settings } = store.current();
+    if (tailoringCache?.revision !== revision) {
+      tailoringCache = { revision, runner: new TailoringRunner({
+        db, artifacts, library, renderer, queue, reviews, personasDir: settings.personaDirectory, dataDir: dir, now, ...deps.tailoring,
+        // Provider and invocation adapter come from settings; swapping either is a settings change.
+        spawner: createSpawner(settings.spawner.provider, { baseUrl: settings.spawner.baseUrl, token: config.spawnerToken }),
+        invocation: createInvocationAdapter(settings.spawner.invocationAdapter ?? "pi"),
+        spawnerProvider: settings.spawner.provider, spawnerInstance: settings.spawner.baseUrl,
+      }) };
+    }
+    return tailoringCache.runner;
+  };
   return {
+    tailoring,
     config, store, db, dir, now, browser, artifacts, http, createSession, capture, postings, sources, discovery, queue, library,
-    reviews: new Reviews(db),
-    renderer: new ResumeRenderer(db, artifacts, library, now),
+    reviews, renderer,
     applications: new Applications({ db, artifacts, now }),
     preparation: new PreparationService({ store, db, artifacts, http, now, createSession }),
     submission: new SubmissionService({ store, db, artifacts, http, now, createSession }),
