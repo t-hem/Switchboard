@@ -1,5 +1,5 @@
 import type { SupervisedBrowser } from "./browser.js";
-import { SourceError } from "./errors.js";
+import { NothingSentError, SourceError } from "./errors.js";
 import { assertImportableUrl } from "./net.js";
 import type { FormField, FormInspection, FormSession, ObservedForm, SubmitConfirmation } from "./adapters/application.js";
 
@@ -35,7 +35,7 @@ function nameSelector(name: string): string {
   return `[name='${name.replace(/'/g, "\\'")}']`;
 }
 
-/** Real browser session over the supervised browser. It fills and previews; it never submits. */
+/** Real browser session over the supervised browser. It fills and previews; only `submitForm` presses submit. */
 export class PuppeteerFormSession implements FormSession {
   private page: import("puppeteer-core").Page | null = null;
   constructor(private readonly browser: SupervisedBrowser, private readonly options: { timeoutMs?: number } = {}) {}
@@ -143,10 +143,14 @@ export class PuppeteerFormSession implements FormSession {
   async submitForm(): Promise<SubmitConfirmation> {
     const page = this.requirePage();
     const control: UploadHandle | null = await page.$(SUBMIT_SELECTOR);
-    if (!control) throw new SourceError("submit_control_missing", "The form has no submit control", false);
+    if (!control) throw new NothingSentError("submit_control_missing", "The form has no submit control; nothing was sent", false);
+    const timeout = Math.min(this.options.timeoutMs ?? 20_000, 15_000);
+    // A native form navigates after the click, while a script-driven one updates in place.
+    // Listen for navigation before clicking so a fast one is not missed.
+    const navigated = page.waitForNavigation({ waitUntil: "load", timeout }).then(() => true, () => false);
     await (control as unknown as { click(): Promise<void> }).click();
-    await page.waitForNetworkIdle({ idleTime: 600, timeout: Math.min(this.options.timeoutMs ?? 20_000, 15_000) }).catch(() => undefined);
-    const found = await page.evaluate((selectors: { confirmation: string; reference: string }) => {
+    await Promise.race([navigated, page.waitForNetworkIdle({ idleTime: 600, timeout }).catch(() => undefined)]);
+    const read = () => page.evaluate((selectors: { confirmation: string; reference: string }) => {
       const g = globalThis as unknown as FormGlobals;
       const read = (selector: string): { text: string | null; result: string | null } => {
         const element = g.document.querySelector(selector) as unknown as { textContent: string | null; getAttribute(name: string): string | null } | null;
@@ -155,6 +159,14 @@ export class PuppeteerFormSession implements FormSession {
       const confirmation = read(selectors.confirmation);
       return { confirmationText: confirmation.text, result: confirmation.result, externalId: read(selectors.reference).text };
     }, { confirmation: CONFIRMATION_SELECTOR, reference: REFERENCE_SELECTOR });
+    let found: { confirmationText: string | null; result: string | null; externalId: string | null };
+    try { found = await read(); }
+    catch {
+      // The page was replaced mid-read by the navigation the click started: read the new one.
+      await navigated;
+      try { found = await read(); }
+      catch { found = { confirmationText: null, result: null, externalId: null }; } // unreadable, so the outcome is unknown
+    }
     return { finalUrl: page.url(), confirmationText: found.confirmationText, externalId: found.externalId, result: found.result };
   }
 

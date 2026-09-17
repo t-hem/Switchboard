@@ -37,7 +37,10 @@ export interface FormSession {
   uploadFile(field: string, filePath: string): Promise<void>;
   observe(): Promise<ObservedForm>;
   clickPreview(): Promise<boolean>;
-  /** Presses the site's real submit control. Called only by the submission service. */
+  /**
+   * Presses the site's real submit control. Called only by the submission service. Throw
+   * `NothingSentError` only for a failure known to precede the press.
+   */
   submitForm(): Promise<SubmitConfirmation>;
   screenshot(): Promise<Uint8Array>;
   close(): Promise<void>;
@@ -53,7 +56,10 @@ export interface ApplicationAdapter {
   /**
    * Performs the external send. Adapters whose `capabilities.submit` is false must refuse.
    * Report `unknown` when the site's response cannot be read reliably (a crash or timeout
-   * after the send began is genuinely ambiguous); throw only when nothing was sent.
+   * after the send began is genuinely ambiguous); throw only when nothing was sent. For
+   * session-backed adapters the service enforces this: a throw after `submitForm` was called
+   * is recorded as unknown unless it is a `NothingSentError`. An adapter that sends without
+   * the session must classify its own failures.
    */
   submit(input: { attemptId: string; formUrl: string; idempotencyKey: string; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<SubmitOutcome>;
 }

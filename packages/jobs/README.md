@@ -213,7 +213,9 @@ non-submitting preview control. Routes: `GET /api/application-adapters`,
 preparing different evidence or answers cancels the prior approval. Sending is a separate, gated action: `POST /api/attempts/:id/submit` rechecks every gate
 and the *effective* site policy revision at that moment, claims the intent atomically, and
 records the site's own outcome (submitted, rejected or `unknown`). An unconfirmable send
-becomes `unknown` with an inbox item; `POST /api/attempts/:id/reconcile` records the
+becomes `unknown` with an inbox item, and so does any failure after the submit control was
+pressed (a navigation, crash or timeout says nothing about what the site received); only a
+failure proven to precede the press returns the attempt to `approved`; `POST /api/attempts/:id/reconcile` records the
 operator's explicit outcome and never resends. `GET|PUT /api/policies` manages audited
 per-site revisions (permit/forbid submission, automatic opt-in, daily cap).
 

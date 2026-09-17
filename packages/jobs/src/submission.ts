@@ -4,7 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { SettingsStore } from "./store.js";
 import { transaction } from "./database.js";
 import { event } from "./events.js";
-import { AppError, SourceError } from "./errors.js";
+import { AppError, NothingSentError, SourceError } from "./errors.js";
 import type { ArtifactStore } from "./artifacts.js";
 import { Reviews } from "./reviews.js";
 import { TaskQueue } from "./queue.js";
@@ -21,6 +21,22 @@ export type SubmitResult = { attemptId: string; state: string; outcome: string |
   externalId: string | null; blocked: Gate | null; reconciledFrom?: string };
 
 const resumeFilename = (applicationId: string): string => `resume-${applicationId.slice(0, 8)}.txt`;
+
+/** Wraps a form session so the service knows whether the adapter pressed the submit control. */
+function trackSubmit(inner: FormSession): { session: FormSession; pressed: () => boolean } {
+  let pressed = false;
+  const session: FormSession = {
+    open: (url, options) => inner.open(url, options),
+    fill: (field, value) => inner.fill(field, value),
+    uploadFile: (field, filePath) => inner.uploadFile(field, filePath),
+    observe: () => inner.observe(),
+    clickPreview: () => inner.clickPreview(),
+    submitForm: () => { pressed = true; return inner.submitForm(); },
+    screenshot: () => inner.screenshot(),
+    close: () => inner.close(),
+  };
+  return { session, pressed: () => pressed };
+}
 
 /**
  * The send path. Every material precondition is rechecked from stored state immediately
@@ -74,16 +90,21 @@ export class SubmissionService {
 
     // 4. Send, then record exactly what came back.
     let result: SubmitOutcome;
-    const session = this.createSession?.() ?? undefined;
+    const tracked = this.createSession ? trackSubmit(this.createSession()) : undefined;
     try {
       const resume: FileUpload = { field: "resume", artifactHash: String(manifest["resumeTextHash"]), filename: resumeFilename(applicationId),
         mimeType: "text/plain", localPath: this.#stageResume(applicationId, String(manifest["resumeTextHash"])) };
       result = await adapter.submit({ attemptId, formUrl, idempotencyKey: String(attempt["idempotency_key"]),
-        answers: (manifest["answers"] ?? {}) as Record<string, string>, resume }, { http: this.deps.http, allowPrivate: true, session });
+        answers: (manifest["answers"] ?? {}) as Record<string, string>, resume }, { http: this.deps.http, allowPrivate: true, session: tracked?.session });
     } catch (error) {
-      // A throw means nothing was sent, so the attempt returns to where it was, not to unknown.
       const detail = error instanceof Error ? error.message : String(error);
       const code = error instanceof SourceError ? error.code : "submit_failed";
+      // Once the submit control was pressed, a failure (a navigation tearing down the page, a
+      // crash, a timeout reading the result) says nothing about whether the site received it.
+      if (tracked?.pressed() && !(error instanceof NothingSentError)) {
+        return this.#recordOutcome(attemptId, applicationId, { outcome: "unknown", detail: `The send failed after submit was pressed (${code}: ${detail})` });
+      }
+      // Nothing was sent, so the attempt returns to where it was, not to unknown.
       transaction(db, () => {
         db.prepare("UPDATE application_attempts SET state=?, send_started_at=NULL WHERE id=?").run(previousState, attemptId);
         db.prepare("UPDATE applications SET state=?, block_reason=?, updated_at=? WHERE id=?").run(previousState === "approved" ? "approved" : "review_required", `${code}: ${detail}`.slice(0, 500), new Date(this.now()).toISOString(), applicationId);
@@ -91,9 +112,14 @@ export class SubmissionService {
       event(db, "application.send_failed", "application", applicationId, { attemptId, code, detail }, this.now());
       return { attemptId, state: previousState, outcome: null, receiptHash: null, externalId: null, blocked: { code, detail } };
     } finally {
-      await session?.close().catch(() => undefined);
+      await tracked?.session.close().catch(() => undefined);
     }
+    return this.#recordOutcome(attemptId, applicationId, result);
+  }
 
+  /** Records exactly what the send produced; an unconfirmed outcome opens reconciliation. */
+  #recordOutcome(attemptId: string, applicationId: string, result: SubmitOutcome): SubmitResult {
+    const db = this.deps.db;
     const state = result.outcome === "submitted" ? "submitted" : result.outcome === "rejected" ? "rejected" : "unknown";
     const textHash = result.confirmationText ? this.deps.artifacts.put(Buffer.from(result.confirmationText, "utf8"), "text/plain", "application-receipt").hash : null;
     const imageHash = result.confirmationImage && result.confirmationImage.byteLength > 0

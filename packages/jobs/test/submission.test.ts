@@ -12,8 +12,8 @@ import { PreparationService } from "../src/preparation.js";
 import { Applications } from "../src/applications.js";
 import { SubmissionService } from "../src/submission.js";
 import { Policies } from "../src/policies.js";
-import { SourceError } from "../src/errors.js";
-import type { ApplicationAdapter, SubmitOutcome } from "../src/adapters/application.js";
+import { NothingSentError, SourceError } from "../src/errors.js";
+import type { ApplicationAdapter, FormSession, SubmitOutcome } from "../src/adapters/application.js";
 import type { HttpClient } from "../src/net.js";
 import type { Settings } from "../src/settings.js";
 
@@ -36,7 +36,7 @@ class ScriptedAdapter implements ApplicationAdapter {
   async submit(): Promise<SubmitOutcome> { this.calls++; return typeof this.behaviour === "function" ? await this.behaviour() : this.behaviour; }
 }
 
-function fixture(t: TestContext, options: { settings?: Partial<Settings>; adapter?: (adapter: ApplicationAdapter) => ApplicationAdapter } = {}) {
+function fixture(t: TestContext, options: { settings?: Partial<Settings>; adapter?: (adapter: ApplicationAdapter) => ApplicationAdapter; createSession?: () => FormSession } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-submit-"));
   const store = new SettingsStore(path.join(dir, "jobs.sqlite"));
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -68,7 +68,7 @@ function fixture(t: TestContext, options: { settings?: Partial<Settings>; adapte
 
   const holder: { adapter: ApplicationAdapter } = { adapter: new ScriptedAdapter({ outcome: "submitted", confirmationText: "Thank you", externalId: "REF-1" }) };
   let injected: ApplicationAdapter | null = null;
-  const submission = new SubmissionService({ store, db: store.db, artifacts, http: offline, now: () => NOW,
+  const submission = new SubmissionService({ store, db: store.db, artifacts, http: offline, now: () => NOW, createSession: options.createSession,
     createAdapter: () => {
       if (!options.adapter) return holder.adapter;
       injected ??= options.adapter(holder.adapter);
@@ -178,6 +178,41 @@ test("a pre-send failure returns the attempt to its previous state and can be re
   const retried = await f.submission.submit(f.attemptId, { actor: "operator" });
   assert.equal(retried.state, "submitted");
   assert.equal(adapterOf(f).calls, 2);
+});
+
+/** A browser-backed send whose session fails exactly as scripted. */
+function sessionThatFails(onSubmit: () => never): FormSession {
+  return {
+    async open() { throw new Error("not used"); }, async fill() {}, async uploadFile() {}, async observe() { throw new Error("not used"); },
+    async clickPreview() { return false; }, async submitForm() { onSubmit(); }, async screenshot() { return new Uint8Array(); }, async close() {},
+  };
+}
+class SessionAdapter extends ScriptedAdapter {
+  override async submit(_input: unknown, context?: { session?: FormSession }): Promise<SubmitOutcome> {
+    this.calls++;
+    await context!.session!.submitForm();
+    return { outcome: "submitted", confirmationText: "Thank you" };
+  }
+}
+
+test("a failure after submit was pressed is unknown, never a return to approved", async (t) => {
+  const f = await prepared(t, { adapter: () => new SessionAdapter({ outcome: "submitted" }),
+    createSession: () => sessionThatFails(() => { throw new Error("Execution context was destroyed, most likely because of a navigation"); }) });
+  const result = await f.submission.submit(f.attemptId, { actor: "operator" });
+  assert.equal(result.state, "unknown", "the site may have received it, so it must not be re-sendable");
+  assert.equal(f.store.db.prepare("SELECT state FROM application_attempts WHERE id=?").get(f.attemptId)!.state, "unknown");
+  assert.equal(f.store.db.prepare("SELECT state FROM applications WHERE id=?").get(f.applicationId)!.state, "submission_unknown");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM attention_items WHERE subject_type='submission-reconcile' AND state='open'").get()!.n, 1);
+  assert.equal((await f.submission.submit(f.attemptId, { actor: "operator" })).blocked?.code, "submission_unknown");
+  assert.equal(adapterOf(f).calls, 1);
+});
+
+test("a failure the session proves happened before the press returns the attempt to approved", async (t) => {
+  const f = await prepared(t, { adapter: () => new SessionAdapter({ outcome: "submitted" }),
+    createSession: () => sessionThatFails(() => { throw new NothingSentError("submit_control_missing", "The form has no submit control; nothing was sent", false); }) });
+  const result = await f.submission.submit(f.attemptId, { actor: "operator" });
+  assert.equal(result.blocked?.code, "submit_control_missing");
+  assert.equal(f.store.db.prepare("SELECT state FROM application_attempts WHERE id=?").get(f.attemptId)!.state, "approved");
 });
 
 test("an unconfirmable send is unknown and requires operator reconciliation", async (t) => {

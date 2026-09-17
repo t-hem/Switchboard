@@ -12,3 +12,9 @@ export class SourceError extends Error {
     super(message);
   }
 }
+/**
+ * A send-path failure that is known to have happened before anything left this machine
+ * (for example, no submit control exists). Any other failure after the submit control was
+ * pressed is ambiguous and is recorded as an unknown outcome.
+ */
+export class NothingSentError extends SourceError {}
