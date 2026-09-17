@@ -1,6 +1,6 @@
 # Implementation handoff
 
-Updated 2026-09-17 (third session). This is the document to read first in a new session.
+Updated 2026-09-17 (fourth session). This is the document to read first in a new session.
 [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) is the authoritative staged plan and log;
 [JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md) is the runbook for running and recovering the add-on;
 [TESTING.md](./TESTING.md) lists what is verified and what still needs hardware.
@@ -21,12 +21,42 @@ Updated 2026-09-17 (third session). This is the document to read first in a new 
   cannot run. The real `--mode json` envelope is also unverified. Everything else in the
   pipeline runs. See [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md).
 
+## Review fixes (2026-09-17, fourth session)
+
+A review of the jobs add-on found bugs that the fixture-only suites could not reach. Each fix
+is its own commit on `master`, with a regression test that fails without it:
+
+- **Evidence and discovery:** an unchanged recapture renews freshness (24-hour dedup window,
+  compared only with the latest capture); discovery no longer resumes forever from a checkpoint
+  a later scan superseded; tags, keywords and locations match whole terms.
+- **Library:** a new profile revision carries the current bullets forward
+  (`carryBullets: false` retires them); only confirmed skill facts print in a `tags` section.
+- **Sending:** a failure after submit was pressed is `unknown`, never back to `approved`
+  (`NothingSentError` marks the proven pre-press case); checkboxes use the operator's answer;
+  preparation never presses a control that can submit; a send targets the application form's own
+  submit control and reads the page it navigated to (new native-form acceptance page); startup
+  sweeps every interrupted send, and each send sweeps old ones first.
+- **Tailoring:** `src/agent-result.ts` rejects any line not derived from stored revisions, and
+  the edit pass may change prose only through declared edits; spawner outages are waited out.
+- **Inbox:** one open item per blocked subject; a resolved handoff finishes its task; a
+  settings save no longer strands open reviews.
+- **Structure:** `src/services.ts` builds one service graph shared by routes and the worker;
+  `src/evidence.ts` holds the shared evidence helpers; the browser launch is single-flight.
+- **Queue and recovery (the plan's release gate):** `src/worker.ts` holds the scheduler lease,
+  runs discovery, and claims queued tailoring stages (only while enabled and unpaused). A stage
+  is fenced by its task lease; `POST /api/tailoring` now queues work instead of running it
+  fire-and-forget. On start the worker blocks the previous owner's tasks and reconciles their
+  agents — reattach a finished child's result, wait on a live one, retry a dead one from saved
+  inputs, change nothing while the host is unreachable. Shutdown never kills an agent.
+  **Proven only against a fake spawner** (`test/runner.test.ts`); the real-host crash matrix
+  below is still the acceptance for it.
+
 ## Next session, in order
 
 1. **Tool bridge** (blocker above), then verify the CLI JSON envelope against a live `pi`.
-2. **Finish step 12**: the full crash matrix (crash the host, crash jobs, crash both — surviving
-   children stay attachable, dead children are recorded, preparation restarts from saved
-   inputs), the affected host/platform/claim/browser regressions, a real posting captured in
+2. **Finish step 12**: the full crash matrix against the real host (crash the host, crash jobs,
+   crash both — surviving children stay attachable and are reattached by the worker, dead
+   children are recorded and retried from saved inputs), the affected host/platform/claim/browser regressions, a real posting captured in
    draft-only mode to judge page extraction and resume readability, and real phone results.
 3. **Real data with the operator**: real resume/bullets/templates, real personas and prose, then
    a real two-pass tailoring smoke on a cheap model.
@@ -58,11 +88,14 @@ Updated 2026-09-17 (third session). This is the document to read first in a new 
 
 Trust these; they were run on `master`.
 
-- Jobs: `npm run jobs:typecheck`, **118 jobs tests**, and ten acceptances —
-  `scaffold`, `scheduling`, `capture`, `library`, `personas`, `review`, `forms`, `submission`,
-  `records`, `rollout` (the last four with real Chromium against loopback fixture sites).
-- Host: `npm run typecheck`, **77 host tests**, plus `packages/host/acceptance/idempotency.mjs`
-  and `restart.mjs` (real tmux owner, ALL PASS).
+- Jobs (re-run 2026-09-17 after the review fixes): `npm run jobs:typecheck`, **136 jobs tests**,
+  and eleven acceptances — `scaffold`, `scheduling`, `capture`, `library`, `personas`, `review`,
+  `forms`, `submission`, `records`, `rollout` (browser suites with real Chromium against loopback
+  fixture sites) and `dashboard` (run from the repo root with `WEB_DIST=$(realpath
+  packages/web/dist)`).
+- Host: `npm run typecheck`, **79 host tests**, plus `packages/host/acceptance/idempotency.mjs`
+  and `restart.mjs` (real tmux owner, ALL PASS; not re-run in the fourth session, which changed
+  no host code).
 - Root: `npm test` (host), `npm run test:all` (host + jobs).
 
 ```sh
@@ -149,7 +182,7 @@ import of host. Use `AgentSpawner`, `AgentInvocationAdapter`, `JobSourceAdapter`
 
 `database.ts` migrates version 0/1→2→3→4 transactionally; `schema.ts` owns all SQL;
 `artifacts.ts` publishes and fsyncs before a database reference exists; `queue.ts` uses
-owner/generation/fence and refuses unresolved-child retries; `backup.ts` uses SQLite online
+owner/generation/fence and refuses unresolved-child retries, and `worker.ts` drives it; `backup.ts` uses SQLite online
 backup plus a hash manifest and a disabled/paused restore; `data-cli.ts` inspects and recovers
 without bootstrapping an empty service; `reviews.ts` enforces immutable review inputs and
 version/settings conflicts; `screening.ts` and `policies.ts` own append-only decision history;

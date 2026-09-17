@@ -48,7 +48,7 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 | `/config/agents` contract, drift → diff → sync, install hints, availability flip | `packages/web/acceptance/agent-sync.mjs` |
 | Takeover, 403 for a non-claimant, lockout banner, take-back | `packages/web/acceptance/claim.mjs` |
 | PWA assets, service worker, phone layout, quick-key byte sequences, Ctrl-C, jump-to-latest, the drag scrollbar | `packages/web/acceptance/mobile.mjs` |
-| Jobs settings, schema, queue fencing, reviews, screening, records, submission gates | `npm run jobs:test` — 118 cases |
+| Jobs settings, schema, queue fencing, reviews, screening, records, submission gates | `npm run jobs:test` — 136 cases |
 | Jobs HTTP lifecycle, auth, disabled dispatch, settings across restart | `packages/jobs/acceptance/scaffold.mjs` |
 | Discovery scheduling: due/interval, checkpoint resume, cap, backoff, pause, UTC, restart | `packages/jobs/acceptance/scheduling.mjs` |
 | Posting import and capture evidence, dedup, SSRF refusal (real Chromium) | `packages/jobs/acceptance/capture.mjs` |
