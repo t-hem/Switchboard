@@ -4,3 +4,7 @@ dist/
 .DS_Store
 .env
 .vite/
+
+# Operator reference archives; never commit
+aisuite-main.zip
+openworker-main.zip
