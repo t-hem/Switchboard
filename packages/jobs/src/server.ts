@@ -10,6 +10,8 @@ import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
 import { AppError, SourceError } from "./errors.js";
+import { applicationsRoutes } from "./applications-api.js";
+import type { SupervisedBrowser } from "./browser.js";
 import { schedulerStatus } from "./scheduler.js";
 import { schedulerRoutes } from "./scheduler-api.js";
 import { screeningRoutes } from "./screening-api.js";
@@ -17,7 +19,7 @@ import { settingsUpdateSchema, type Settings } from "./settings.js";
 import type { SettingsStore } from "./store.js";
 
 export function buildServer(config:ServiceConfig, store:SettingsStore, dir:string,
-  options:{uiDir?:URL; deps?:PostingsDeps} = {}) {
+  options:{uiDir?:URL; deps?:PostingsDeps; browser?:SupervisedBrowser} = {}) {
   const uiDir = options.uiDir ?? new URL("../../jobs-ui/dist/", import.meta.url);
   const app = Fastify({logger:false,bodyLimit:256*1024,ajv:{customOptions:{coerceTypes:false,removeAdditional:false,useDefaults:false}}});
 
@@ -47,7 +49,7 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   });
   app.get("/health", async()=>({service:"switchboard-jobs",version:"0.1.0",apiVersion:1}));
   app.get("/api/status",async()=>({scheduler:schedulerStatus(store,store.db),dataDirectory:dir,
-    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:false},
+    capabilities:{settings:true,import:true,discovery:true,screening:true,capture:Boolean(config.browserExecutablePath),resumes:true,pdf:false,agents:false,applications:true},
     bootstrap:{port:config.port,allowedOrigins:config.allowedOrigins,tokenConfigured:true,allowPrivateImport:config.allowPrivateImport===true}}));
   app.get("/api/settings",async()=>store.current());
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
@@ -62,7 +64,8 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
     return store.update(req.body.expectedRevision,req.body.value);
   });
   dashboardRoutes(app,store,dir);
-  postingsRoutes(app,store,dir,config,options.deps);
+  postingsRoutes(app,store,dir,config,{...options.deps,browser:options.browser});
+  applicationsRoutes(app,store,dir,config,{browser:options.browser,now:options.deps?.now});
   libraryRoutes(app,store,dir);
   personasRoutes(app,store);
   schedulerRoutes(app,store,dir,config);

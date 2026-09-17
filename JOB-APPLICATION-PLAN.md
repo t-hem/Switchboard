@@ -1438,3 +1438,33 @@ Approved to proceed; see implementation entries below.
   the review screen (posting text/images, resume, answers, diff since review), the fixture
   form server acceptance, and manual-completion receipts. Those are 9b. Nothing in 9a
   transmits or submits anything.
+
+### 2026-09-16 — step 9b complete except the review screen
+
+- Branch `step9-application-prep`. `browser.ts` supervises exactly one Chromium with a
+  profile under the jobs data directory and an ownership record; ownership is proven by
+  `--user-data-dir`, so a recycled PID is dropped rather than killed, and a reap reports
+  `killed` only after observing the death (a survivor is reported `failed` and kept on
+  record). The service reaps its own orphan at startup and shares that one browser with
+  posting capture, so there are never two Chromium instances.
+- `form.ts` adds the `FormSession` seam and a real `PuppeteerFormSession`: fields read from
+  standard DOM semantics, name validation before any CSS selector, input/change dispatch,
+  an SSRF re-check after redirect, and CAPTCHA/forbidden markers surfaced instead of
+  bypassed. `fixture-form` fills text/select/checkbox, uploads a named copy of the verified
+  resume, records what the page actually shows as evidence, and clicks only the site's own
+  non-submitting preview control — never submit.
+- `applications.ts` / `applications-api.ts`: approval bound to one attempt's manifest hash
+  (a mismatched or non-draft approval is refused), automatic cancellation of a prior
+  approval when different evidence or answers are prepared, `changesSinceReview`, the review
+  package (posting evidence, resume, answers, agent run, source link), handoff resolution
+  and operator-reported manual completion with the receipt stored as an artifact.
+- `acceptance/forms.mjs` (real Chromium, loopback fixture site): the site receives the exact
+  fields and the exact resume sha256 with **zero submissions**; an identical repeat contacts
+  the site zero times; changed answers create a new attempt; CAPTCHA and forbidden pages
+  become handoffs carrying URL/answers/resume with no further request; a page with no form
+  is a valid reviewable outcome; a second supervisor reaps the left-behind browser and no
+  unmanaged Chromium child survives.
+- Verified: jobs typecheck, 101 jobs tests (4 new), `scaffold`, `scheduling` and `forms`
+  acceptances all pass. Still outstanding for step 9: the review screen in `jobs-ui`
+  (posting text/images, selected resume, answers, changes since review, approve, handoff
+  resolution, manual completion). Nothing in this stage submits an application.

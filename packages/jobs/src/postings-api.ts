@@ -8,11 +8,12 @@ import { Sources } from "./sources.js";
 import { Discovery } from "./discovery.js";
 import { FetchHttpClient, type HttpClient } from "./net.js";
 import { CaptureService, BrowserPageCapture } from "./capture.js";
+import type { SupervisedBrowser } from "./browser.js";
 import { createSourceAdapter, sourceAdapterIds } from "./adapters/source.js";
 import "./adapters/greenhouse.js";
 import "./adapters/fixture.js";
 
-export type PostingsDeps = { http?: HttpClient; capture?: CaptureService | null; now?: () => number };
+export type PostingsDeps = { http?: HttpClient; capture?: CaptureService | null; now?: () => number; browser?: SupervisedBrowser };
 
 /**
  * Import/capture surface for job postings. Every route is behind the jobs bearer token
@@ -26,7 +27,7 @@ export function postingsRoutes(app: FastifyInstance, store: SettingsStore, dir: 
   const sources = new Sources(db, deps.now);
   const http = deps.http ?? new FetchHttpClient({ allowPrivate: config.allowPrivateImport === true });
   const discovery = new Discovery(db, sources, postings, artifacts, http, deps.now);
-  const browserCapture = config.browserExecutablePath ? new CaptureService(new BrowserPageCapture(config.browserExecutablePath)) : null;
+  const browserCapture = config.browserExecutablePath ? new CaptureService(new BrowserPageCapture(config.browserExecutablePath, deps.browser)) : null;
   const capture = deps.capture !== undefined ? deps.capture : browserCapture;
   app.addHook("onClose", async () => { await capture?.close(); });
 

@@ -103,7 +103,10 @@ export class PreparationService {
         db.prepare(`INSERT INTO application_attempts(id,application_id,idempotency_key,adapter_id,state,snapshot_id,resume_id,settings_revision,policy_id,manifest_json,preflight_at,created_at)
           VALUES(?,?,?,?,'draft',?,?,?,?,?,?,?)`).run(attemptId, String(application["id"]), idempotencyKey, adapter.id, String(snapshot["id"]), resumeId,
           input.settingsRevision, policyId, JSON.stringify({ ...manifest, manifestHash }), time, time);
-        db.prepare("UPDATE applications SET state='review_required',block_reason=NULL,updated_at=? WHERE id=? AND state IN('discovered','captured','screened','preparing','needs_input','review_required')")
+        // Different evidence or answers supersede a prior approval; it can never carry over to a send.
+        const superseded = db.prepare("UPDATE application_attempts SET state='cancelled' WHERE application_id=? AND state='approved'").run(String(application["id"]));
+        if (Number(superseded.changes) > 0) event(db, "application.approval_invalidated", "application", String(application["id"]), { byAttemptId: attemptId, manifestHash }, this.now());
+        db.prepare("UPDATE applications SET state='review_required',block_reason=NULL,updated_at=? WHERE id=? AND state IN('discovered','captured','screened','preparing','needs_input','review_required','approved')")
           .run(time, String(application["id"]));
         event(db, "application.prepared", "application", String(application["id"]), { attemptId, manifestHash, adapterId: adapter.id }, this.now());
         return { attemptId, created: true, state: "draft", manifest: { ...manifest, manifestHash } };

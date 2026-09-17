@@ -9,6 +9,7 @@ import { Discovery } from "./discovery.js";
 import { TaskQueue } from "./queue.js";
 import { FetchHttpClient } from "./net.js";
 import { DiscoveryScheduler } from "./scheduler.js";
+import { SupervisedBrowser, browserPaths } from "./browser.js";
 
 async function main(): Promise<void> {
   assertRuntime();
@@ -25,7 +26,12 @@ async function main(): Promise<void> {
   const scheduler=new DiscoveryScheduler({store,sources,discovery,queue:new TaskQueue(store.db),owner:`jobs-worker-${process.pid}`});
   scheduler.start();
 
-  const app=buildServer(config,store,dir);
+  // One owned browser per service, with its own profile; a crashed run is reaped on start.
+  const browser = config.browserExecutablePath
+    ? new SupervisedBrowser({ executablePath: config.browserExecutablePath, ...browserPaths(dir) })
+    : undefined;
+  if (browser) { const reaped = await browser.reapStale(); if (reaped !== "no_record" && reaped !== "already_gone") console.log(`Supervised browser cleanup: ${reaped}`); }
+  const app=buildServer(config,store,dir,{browser});
   try { await app.listen({host:"127.0.0.1",port:config.port}); }
   catch(error) { scheduler.stop(); await app.close(); throw error; }
   console.log(`Jobs service: http://127.0.0.1:${config.port} (discovery scheduler active; enable jobs and a source to run)`);
@@ -34,6 +40,7 @@ async function main(): Promise<void> {
   for(const signal of ["SIGTERM","SIGINT"] as const)process.on(signal,()=>{
     if(closing)return;closing=true;
     scheduler.stop();
+    void browser?.close().catch(()=>undefined);
     void app.close().catch(()=>{process.exitCode=1;});
   });
 }

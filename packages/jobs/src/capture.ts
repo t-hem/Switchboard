@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import puppeteer, { type Browser } from "puppeteer-core";
+import type { SupervisedBrowser } from "./browser.js";
 import { SourceError } from "./errors.js";
 import { assertImportableUrl, withRetries } from "./net.js";
 
@@ -36,8 +37,10 @@ export interface PageCapture {
 
 export class BrowserPageCapture implements PageCapture {
   private browser: Browser | null = null;
-  constructor(private readonly executablePath: string) {}
+  /** A shared SupervisedBrowser keeps the service to one owned Chromium with one profile. */
+  constructor(private readonly executablePath: string, private readonly supervised?: SupervisedBrowser) {}
   private async ensure(): Promise<Browser> {
+    if (this.supervised) return this.supervised.ensure();
     if (!this.browser || !this.browser.connected) {
       this.browser = await puppeteer.launch({
         executablePath: this.executablePath, headless: true,
@@ -92,6 +95,7 @@ export class BrowserPageCapture implements PageCapture {
     }
   }
   async close(): Promise<void> {
+    if (this.supervised) return; // the service owns the shared browser's lifetime
     if (this.browser) { await this.browser.close().catch(() => undefined); this.browser = null; }
   }
 }
