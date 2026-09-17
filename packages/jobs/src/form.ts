@@ -1,7 +1,7 @@
 import type { SupervisedBrowser } from "./browser.js";
 import { SourceError } from "./errors.js";
 import { assertImportableUrl } from "./net.js";
-import type { FormField, FormInspection, FormSession, ObservedForm } from "./adapters/application.js";
+import type { FormField, FormInspection, FormSession, ObservedForm, SubmitConfirmation } from "./adapters/application.js";
 
 /** Narrow browser-side interop: these callbacks are serialized into the page, not run in Node. */
 type ControlLike = {
@@ -21,6 +21,11 @@ type UploadHandle = { uploadFile(...paths: string[]): Promise<void> };
 
 /** A site's own non-submitting validation control, never the submit button. */
 const PREVIEW_SELECTOR = "[data-apply-action='preview'], button[name='preview'], input[type='submit'][value*='review' i]";
+/** The real submit control; only `submitForm` may touch this. */
+const SUBMIT_SELECTOR = "[data-apply-action='submit'], button[type='submit'], input[type='submit']";
+/** A confirmation the site actually rendered, plus any reference it printed. */
+const CONFIRMATION_SELECTOR = "[data-apply-confirmation], #confirmation, [role='status'][data-apply-result]";
+const REFERENCE_SELECTOR = "[data-apply-reference]";
 const CAPTCHA_SELECTOR = "[data-apply-captcha], iframe[src*='recaptcha'], .g-recaptcha, [data-sitekey]";
 const FORBIDDEN_SELECTOR = "[data-apply-automation-forbidden]";
 
@@ -129,6 +134,32 @@ export class PuppeteerFormSession implements FormSession {
 
   async close(): Promise<void> {
     if (this.page) { await this.page.close().catch(() => undefined); this.page = null; }
+  }
+  /**
+   * Presses the site's real submit control and reads whatever confirmation it renders.
+   * Nothing is inferred: if the site shows no readable confirmation, both fields are null
+   * and the caller must treat the send as unknown.
+   */
+  async submitForm(): Promise<SubmitConfirmation> {
+    const page = this.requirePage();
+    const control: UploadHandle | null = await page.$(SUBMIT_SELECTOR);
+    if (!control) throw new SourceError("submit_control_missing", "The form has no submit control", false);
+    await (control as unknown as { click(): Promise<void> }).click();
+    await page.waitForNetworkIdle({ idleTime: 600, timeout: Math.min(this.options.timeoutMs ?? 20_000, 15_000) }).catch(() => undefined);
+    const found = await page.evaluate((selectors: { confirmation: string; reference: string }) => {
+      const g = globalThis as unknown as FormGlobals;
+      const read = (selector: string): string | null => {
+        const element = g.document.querySelector(selector) as unknown as { textContent: string | null } | null;
+        return element?.textContent?.trim() ?? null;
+      };
+      return { confirmationText: read(selectors.confirmation), externalId: read(selectors.reference) };
+    }, { confirmation: CONFIRMATION_SELECTOR, reference: REFERENCE_SELECTOR });
+    return { finalUrl: page.url(), confirmationText: found.confirmationText, externalId: found.externalId };
+  }
+
+  /** Evidence for whatever happened on the page, used as the submission receipt. */
+  async screenshot(): Promise<Uint8Array> {
+    return new Uint8Array(await this.requirePage().screenshot({ fullPage: true, type: "png" }));
   }
   private requirePage(): import("puppeteer-core").Page {
     if (!this.page) throw new SourceError("session_closed", "The browser session is not open", false);

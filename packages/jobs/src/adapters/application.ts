@@ -1,4 +1,4 @@
-import { AppError } from "../errors.js";
+import { AppError, SourceError } from "../errors.js";
 import type { HttpClient } from "../net.js";
 
 /**
@@ -18,6 +18,13 @@ export type PreparedForm = { filled: { field: string; value: string }[]; uploads
 /** What the page actually shows after filling: evidence, not the values the adapter intended. */
 export type UploadedFile = { field: string; fileName: string; sizeBytes: number };
 export type ObservedForm = { finalUrl: string; filled: { field: string; value: string }[]; uploads: UploadedFile[] };
+export type SubmitConfirmation = { finalUrl: string; confirmationText: string | null; externalId: string | null };
+/**
+ * The result of a send. `unknown` is the honest answer when the site's response cannot be
+ * read reliably: never report success from an assumption. A pre-send failure throws.
+ */
+export type SubmitOutcome = { outcome: "submitted" | "rejected" | "unknown"; confirmationText?: string | null;
+  confirmationImage?: Uint8Array | null; externalId?: string | null; detail?: string };
 
 /**
  * Browser seam. A real implementation drives the supervised browser; unit tests supply a
@@ -30,6 +37,9 @@ export interface FormSession {
   uploadFile(field: string, filePath: string): Promise<void>;
   observe(): Promise<ObservedForm>;
   clickPreview(): Promise<boolean>;
+  /** Presses the site's real submit control. Called only by the submission service. */
+  submitForm(): Promise<SubmitConfirmation>;
+  screenshot(): Promise<Uint8Array>;
   close(): Promise<void>;
 }
 export type ApplicationContext = { http: HttpClient; allowPrivate: boolean; session?: FormSession };
@@ -40,6 +50,12 @@ export interface ApplicationAdapter {
   readonly capabilities: ApplicationCapabilities;
   inspect(formUrl: string, context: ApplicationContext): Promise<FormInspection>;
   prepare(input: { inspection: FormInspection; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<PreparedForm>;
+  /**
+   * Performs the external send. Adapters whose `capabilities.submit` is false must refuse.
+   * Report `unknown` when the site's response cannot be read reliably (a crash or timeout
+   * after the send began is genuinely ambiguous); throw only when nothing was sent.
+   */
+  submit(input: { attemptId: string; formUrl: string; idempotencyKey: string; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<SubmitOutcome>;
 }
 
 /** Manual handoff: it never pretends to fill a form. */
@@ -49,6 +65,7 @@ export class ManualApplicationAdapter implements ApplicationAdapter {
   readonly capabilities: ApplicationCapabilities = { prepare: false, fill: false, upload: false, submit: false, reconcile: false };
   async inspect(): Promise<FormInspection> { throw new AppError("unsupported_capability", "Manual handoff has no form automation", 409); }
   async prepare(): Promise<PreparedForm> { throw new AppError("unsupported_capability", "Manual handoff has no form automation", 409); }
+  async submit(): Promise<SubmitOutcome> { throw new AppError("unsupported_capability", "A manual handoff never sends anything", 409); }
 }
 
 const DEFAULT_FIELDS: FormField[] = [
@@ -92,14 +109,37 @@ export class FixtureApplicationAdapter implements ApplicationAdapter {
     }
     return { filled, uploads, missing };
   }
+  async submit(): Promise<SubmitOutcome> { throw new AppError("unsupported_capability", "The fixture adapter prepares in process and never sends", 409); }
 }
 
 type Factory = (options?: Record<string, unknown>) => ApplicationAdapter;
+/** Fills a live form from the recorded answers, uploading the resume by its verified path. */
+async function fillLiveForm(session: FormSession, fields: FormField[], answers: Record<string, string>, resume: FileUpload): Promise<PreparedForm> {
+  const intended: PreparedForm = { filled: [], uploads: [], missing: [] };
+  for (const field of fields) {
+    if (field.type === "hidden") continue;
+    if (field.type === "file") {
+      if (field.name === resume.field) {
+        if (!resume.localPath) { intended.missing.push(field.name); continue; }
+        await session.uploadFile(field.name, resume.localPath);
+        intended.uploads.push(resume);
+      } else if (field.required) intended.missing.push(field.name);
+      continue;
+    }
+    const raw = answers[field.name];
+    if (raw === undefined || raw === "") { if (field.required) intended.missing.push(field.name); continue; }
+    if (field.type === "select" && field.options && !field.options.includes(raw)) { intended.missing.push(field.name); continue; }
+    await session.fill(field.name, field.type === "checkbox" ? "true" : raw);
+    intended.filled.push({ field: field.name, value: raw });
+  }
+  return intended;
+}
+
 /** A browser-backed adapter over an injected `FormSession`; it needs the supervised browser. */
 export class FixtureFormAdapter implements ApplicationAdapter {
   readonly id = "fixture-form";
   readonly version = "1";
-  readonly capabilities: ApplicationCapabilities = { prepare: true, fill: true, upload: true, submit: false, reconcile: false };
+  readonly capabilities: ApplicationCapabilities = { prepare: true, fill: true, upload: true, submit: true, reconcile: false };
   async inspect(formUrl: string, context: ApplicationContext): Promise<FormInspection> {
     const session = requireSession(context);
     const opened = await session.open(formUrl, { allowPrivate: context.allowPrivate, timeoutMs: 20_000 });
@@ -107,28 +147,29 @@ export class FixtureFormAdapter implements ApplicationAdapter {
   }
   async prepare(input: { inspection: FormInspection; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<PreparedForm> {
     const session = requireSession(context);
-    const intended: PreparedForm = { filled: [], uploads: [], missing: [] };
-    for (const field of input.inspection.fields) {
-      if (field.type === "hidden") continue;
-      if (field.type === "file") {
-        if (field.name === input.resume.field) {
-          if (!input.resume.localPath) { intended.missing.push(field.name); continue; }
-          await session.uploadFile(field.name, input.resume.localPath);
-          intended.uploads.push(input.resume);
-        } else if (field.required) intended.missing.push(field.name);
-        continue;
-      }
-      const raw = input.answers[field.name];
-      if (raw === undefined || raw === "") { if (field.required) intended.missing.push(field.name); continue; }
-      if (field.type === "select" && field.options && !field.options.includes(raw)) { intended.missing.push(field.name); continue; }
-      await session.fill(field.name, field.type === "checkbox" ? "true" : raw);
-      intended.filled.push({ field: field.name, value: raw });
-    }
+    const intended = await fillLiveForm(session, input.inspection.fields, input.answers, input.resume);
     // A partial form is never presented as ready, and a preview is never triggered for one.
     if (intended.missing.length) return intended;
     const observed = await session.observe(); // report what the page shows, not what we typed
     await session.clickPreview();             // the site's own validation control, never submit
     return { filled: observed.filled, uploads: intended.uploads, missing: [] };
+  }
+  /** The only code path that presses submit, and only the submission service calls it. */
+  async submit(input: { attemptId: string; formUrl: string; idempotencyKey: string; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<SubmitOutcome> {
+    const session = requireSession(context);
+    // Sending is a fresh, complete submission: fill the live form again, then press submit.
+    const opened = await session.open(input.formUrl, { allowPrivate: context.allowPrivate, timeoutMs: 20_000 });
+    // A site that now blocks automation is a pre-send refusal: nothing was sent.
+    if (opened.captcha) throw new SourceError("submit_blocked", "The site now presents a CAPTCHA; nothing was sent", false);
+    if (opened.automationForbidden) throw new SourceError("submit_blocked", "The site now forbids automation; nothing was sent", false);
+    const intended = await fillLiveForm(session, opened.fields, input.answers, input.resume);
+    if (intended.missing.length) throw new SourceError("unsupported_required_fields", `Required fields could not be filled: ${intended.missing.join(", ")}`, false);
+    const confirmation = await session.submitForm();
+    const image = await session.screenshot().catch(() => null);
+    const text = confirmation.confirmationText?.trim() ?? null;
+    // No readable confirmation is not a success: it is an unknown the operator must resolve.
+    if (!text && !confirmation.externalId) return { outcome: "unknown", confirmationText: null, confirmationImage: image, detail: "The site showed no readable confirmation of the send" };
+    return { outcome: "submitted", confirmationText: text, confirmationImage: image, externalId: confirmation.externalId };
   }
 }
 function requireSession(context: ApplicationContext): FormSession {
