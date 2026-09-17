@@ -154,16 +154,16 @@ export class PreparationService {
       transaction(db, markNeedsInput);
       return { attemptId: null, created: false, state: "needs_input", code, detail };
     }
-    const task = queue.enqueue({ kind: "application:needs-input", input: { applicationId: input.applicationId, code, ...context }, settingsRevision: input.settingsRevision, maxAttempts: 1 });
+    // The task, the inbox item and the application's state commit together.
     transaction(db, () => {
-      db.prepare("UPDATE tasks SET state='waiting_review',updated_at=? WHERE id=?").run(time, task.id);
       markNeedsInput();
+      const task = queue.enqueue({ kind: "application:needs-input", input: { applicationId: input.applicationId, code, ...context }, settingsRevision: input.settingsRevision, maxAttempts: 1, state: "waiting_review" }, this.now());
+      reviews.open({ taskId: task.id, subjectType: "application-handoff", subjectId: input.applicationId, subjectVersion,
+        title: `${adapter.id}: ${code}`, detail,
+        context: { ...context, code, formUrl: context["formUrl"] ?? input.formUrl, answers: input.answers, adapterId: adapter.id, adapterVersion: adapter.version },
+        settingsRevision: input.settingsRevision });
+      event(db, "application.needs_input", "application", input.applicationId, { code, taskId: task.id }, this.now());
     });
-    reviews.open({ taskId: task.id, subjectType: "application-handoff", subjectId: input.applicationId, subjectVersion,
-      title: `${adapter.id}: ${code}`, detail,
-      context: { ...context, code, formUrl: context["formUrl"] ?? input.formUrl, answers: input.answers, adapterId: adapter.id, adapterVersion: adapter.version },
-      settingsRevision: input.settingsRevision });
-    event(db, "application.needs_input", "application", input.applicationId, { code, taskId: task.id }, this.now());
     return { attemptId: null, created: true, state: "needs_input", code, detail };
   }
 

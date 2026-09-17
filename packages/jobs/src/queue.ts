@@ -12,8 +12,12 @@ export type Task={id:string;kind:string;effectClass:"preparation"|"submission";s
 function ttl(value:number):void{if(!Number.isSafeInteger(value)||value<1||value>300000)throw new AppError("invalid_lease","Lease duration must be 1–300000 milliseconds");}
 export class TaskQueue {
   constructor(readonly db:DatabaseSync){}
-  enqueue(input:{id?:string;kind:string;effectClass?:"preparation"|"submission";input:unknown;settingsRevision:number;parentTaskId?:string;maxAttempts?:number},now=Date.now()):Task{
-    const id=input.id??randomUUID(),data=JSON.stringify(input.input),effect=input.effectClass??"preparation",max=input.maxAttempts??2;
+  /**
+   * `waiting_review` creates a task that exists only to wait on an operator decision; it is
+   * never claimable, so a worker cannot pick it up in the moment before its review opens.
+   */
+  enqueue(input:{id?:string;kind:string;effectClass?:"preparation"|"submission";input:unknown;settingsRevision:number;parentTaskId?:string;maxAttempts?:number;state?:"queued"|"waiting_review"},now=Date.now()):Task{
+    const id=input.id??randomUUID(),data=JSON.stringify(input.input),effect=input.effectClass??"preparation",max=input.maxAttempts??2,initial=input.state??"queued";
     if(!input.kind||!Number.isSafeInteger(max)||max<1||max>20||data===undefined)throw new AppError("invalid_task","Task kind, JSON input, and a retry budget of 1–20 are required");
     return transaction(this.db,()=>{
       const existing=this.get(id);
@@ -24,8 +28,8 @@ export class TaskQueue {
       }
       const time=new Date(now).toISOString();
       this.db.prepare(`INSERT INTO tasks(id,kind,effect_class,state,parent_task_id,settings_revision,input_json,max_attempts,available_at,created_at,updated_at)
-        VALUES(?,?,?,'queued',?,?,?,?,?,?,?)`).run(id,input.kind,effect,input.parentTaskId??null,input.settingsRevision,data,max,now,time,time);
-      event(this.db,"task.queued","task",id,{effectClass:effect,settingsRevision:input.settingsRevision},now);
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id,input.kind,effect,initial,input.parentTaskId??null,input.settingsRevision,data,max,now,time,time);
+      event(this.db,`task.${initial}`,"task",id,{effectClass:effect,settingsRevision:input.settingsRevision},now);
       return this.get(id)!;
     });
   }
@@ -106,6 +110,30 @@ export class TaskQueue {
   }
   complete(lease:TaskLease,result:unknown,now=Date.now()):void{
     transaction(this.db,()=>{const task=this.#leased(lease,now);if(task.state!=="running"||task.effectClass==="submission")throw new AppError("submission_requires_resolution","Use explicit submission outcome reconciliation",409);this.#finish(lease,"succeeded",result,null,now);});
+  }
+  /** A claimed task whose output now waits on an operator decision; the lease is released. */
+  awaitReview(lease:TaskLease,now=Date.now()):void{
+    transaction(this.db,()=>{const task=this.#leased(lease,now);if(task.state!=="running")throw new AppError("invalid_transition","Only running work can wait for review",409);this.#finish(lease,"waiting_review",null,null,now);});
+  }
+  /** Settles a task that only waited on a review: its decision finished it, or a newer request replaced it. */
+  settleReview(id:string,state:"succeeded"|"cancelled",now=Date.now()):boolean{
+    return transaction(this.db,()=>{
+      const changed=Number(this.db.prepare("UPDATE tasks SET state=?,updated_at=? WHERE id=? AND state='waiting_review'").run(state,new Date(now).toISOString(),id).changes);
+      if(changed)event(this.db,`task.${state}`,"task",id,{from:"waiting_review"},now);
+      return changed===1;
+    });
+  }
+  /**
+   * Settles a task that recovery blocked, once its child is reconciled: a finished child's
+   * accepted result moves it to review, an unusable one fails it. Retrying uses `retry`.
+   */
+  resolveBlocked(id:string,state:"waiting_review"|"failed",error:{code:string;message:string}|null,now=Date.now()):void{
+    transaction(this.db,()=>{
+      const task=this.get(id);
+      if(task?.state!=="blocked")throw new AppError("invalid_transition","Only blocked work can be resolved after reconciliation",409);
+      this.db.prepare("UPDATE tasks SET state=?,error_json=?,updated_at=? WHERE id=?").run(state,error===null?null:JSON.stringify(error),new Date(now).toISOString(),id);
+      event(this.db,`task.${state}`,"task",id,{from:"blocked",error},now);
+    });
   }
   resolveSubmission(lease:TaskLease,outcome:"submitted"|"rejected"|"unknown",evidence:unknown,now=Date.now()):void{
     transaction(this.db,()=>{const task=this.#leased(lease,now);if(task.state!=="submitting")throw new AppError("invalid_transition","No active send intent",409);this.#finish(lease,outcome==="submitted"?"succeeded":outcome==="rejected"?"failed":"unknown",evidence,null,now);});

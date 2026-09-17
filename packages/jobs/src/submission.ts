@@ -257,18 +257,18 @@ export class SubmissionService {
     const db = this.deps.db;
     const queue = new TaskQueue(db), reviews = new Reviews(db);
     if (reviews.openItem("submission-reconcile", applicationId, attemptId)) return;
-    const task = queue.enqueue({ kind: "application:reconcile", input: { applicationId, attemptId }, settingsRevision, maxAttempts: 1 });
-    const time = new Date(this.now()).toISOString();
-    transaction(db, () => db.prepare("UPDATE tasks SET state='waiting_review', updated_at=? WHERE id=?").run(time, task.id));
-    reviews.open({ taskId: task.id, subjectType: "submission-reconcile", subjectId: applicationId, subjectVersion: attemptId,
-      title: "Confirm the submission outcome", detail,
-      context: { applicationId, attemptId, hint: "Check the site or your email, then record what you found. Nothing is retried automatically." }, settingsRevision });
+    transaction(db, () => {
+      const task = queue.enqueue({ kind: "application:reconcile", input: { applicationId, attemptId }, settingsRevision, maxAttempts: 1, state: "waiting_review" }, this.now());
+      reviews.open({ taskId: task.id, subjectType: "submission-reconcile", subjectId: applicationId, subjectVersion: attemptId,
+        title: "Confirm the submission outcome", detail,
+        context: { applicationId, attemptId, hint: "Check the site or your email, then record what you found. Nothing is retried automatically." }, settingsRevision });
+    });
   }
 
   #resolveReconcileTask(applicationId: string): void {
     const db = this.deps.db;
     const item = db.prepare("SELECT task_id FROM attention_items WHERE subject_type='submission-reconcile' AND subject_id=? ORDER BY created_at DESC LIMIT 1").get(applicationId) as Record<string, unknown> | undefined;
     if (!item) return;
-    transaction(db, () => db.prepare("UPDATE tasks SET state='succeeded', updated_at=? WHERE id=? AND state='waiting_review'").run(new Date(this.now()).toISOString(), String(item["task_id"])));
+    new TaskQueue(db).settleReview(String(item["task_id"]), "succeeded", this.now());
   }
 }

@@ -3,7 +3,12 @@ import { defaultSettings } from "./settings.js";
 import { workflowSchema, immutableTables } from "./schema.js";
 
 export const SCHEMA_VERSION = 4;
+/**
+ * Runs `action` atomically. Nested calls join the enclosing transaction, so composite
+ * workflow steps (accept a result, open its review, queue the next stage) commit together.
+ */
 export function transaction<T>(db:DatabaseSync, action:()=>T): T {
+  if(db.isTransaction)return action();
   db.exec("BEGIN IMMEDIATE");
   try {const result=action();db.exec("COMMIT");return result;}
   catch(error){db.exec("ROLLBACK");throw error;}

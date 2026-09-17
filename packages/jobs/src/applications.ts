@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { jsonDigest as digest } from "./evidence.js";
 import type { DatabaseSync } from "node:sqlite";
 import { transaction } from "./database.js";
+import { TaskQueue } from "./queue.js";
 import { event } from "./events.js";
 import { AppError } from "./errors.js";
 import { type ArtifactStore } from "./artifacts.js";
@@ -150,7 +151,7 @@ export class Applications {
     transaction(db, () => {
       db.prepare("UPDATE attention_items SET state='resolved', version=version+1, updated_at=? WHERE id=? AND state='open'").run(time, handoffId);
       // The task existed only to wait on this handoff, so resolving it finishes the task.
-      db.prepare("UPDATE tasks SET state='succeeded', updated_at=? WHERE id=? AND state='waiting_review'").run(time, String(row["task_id"]));
+      new TaskQueue(db).settleReview(String(row["task_id"]), "succeeded", this.now());
       event(db, "application.handoff_resolved", "application", applicationId, { handoffId, code: input.code ?? null, note: input.note }, this.now());
     });
     return { handoffId };
