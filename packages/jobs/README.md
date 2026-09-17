@@ -199,9 +199,22 @@ writes an immutable `application_attempts` draft row with the full manifest and 
 settings and form, so repeating a preparation reuses the same draft and creates no
 duplicate. A `source_policy` revision is created with `submit:false`.
 
-Still 9b: the dedicated supervised browser + profile and real filling, HTTP routes, the
-review screen, the fixture form-server acceptance, and manual-completion receipts. Nothing
-here transmits or submits anything.
+The supervised browser (`browser.ts`) is one owned Chromium with a profile under the jobs
+data directory; ownership is proven by `--user-data-dir`, so a recycled PID is dropped
+rather than killed, and a reaped orphan is only reported dead once observed. `form.ts`
+provides the `FormSession` seam and a real Puppeteer session; `fixture-form` fills a real
+form, uploads a named copy of the verified resume, and clicks only the site's own
+non-submitting preview control. Routes: `GET /api/application-adapters`,
+`POST /api/applications/:id/prepare`, `GET /api/applications/:id/package`,
+`POST /api/applications/:id/resolve`, `POST /api/applications/:id/manual-completion`,
+`POST /api/attempts/:id/approve`. Approving binds to one attempt's manifest hash;
+preparing different evidence or answers cancels the prior approval. Still outstanding:
+the `jobs-ui` review screen. Nothing here transmits a submission.
+
+```sh
+npm run jobs:build
+JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/forms.mjs
+```
 
 ```sh
 node --test --import tsx packages/jobs/test/preparation.test.ts

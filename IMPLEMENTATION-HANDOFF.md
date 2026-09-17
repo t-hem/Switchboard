@@ -123,6 +123,15 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   with an idempotency key that prevents duplicate preparation, a `source_policy` revision
   with `submit:false`, and CAPTCHA/forbidden/manual handoffs as durable inbox items. 9b
   adds the supervised browser, HTTP routes, review UI and fixture form server.
+- **Step 9b** (verified, on branch `step9-application-prep`): `browser.ts` (one owned
+  Chromium, profile under the jobs dir, ownership proven by `--user-data-dir` so a
+  recycled PID is dropped and a reap is only reported after the death is observed; the
+  orphan is reaped at startup and the browser is shared with posting capture),
+  `form.ts` (`FormSession` + `PuppeteerFormSession`), `fixture-form`
+  (fills, uploads a named copy of the verified resume, previews but never submits),
+  `applications.ts`/`applications-api.ts` (manifest-hash approval, automatic invalidation
+  of a stale approval, review package with `changesSinceReview`, handoff resolution,
+  manual-completion receipts). `acceptance/forms.mjs` covers it with real Chromium.
 - **Step 8** (verified, on branch `step8-search-filtering`): discovery scheduling with
   paginated checkpoints (resume after a cap or rate limit), `Retry-After`-aware backoff,
   a restart-safe interval scheduler with a shared lease and bounded cycles, schema-4
@@ -207,7 +216,19 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 9b — supervised browser, form filling, HTTP surface and review UI
+## Next: step 9c — the review screen in jobs-ui
+
+Step 9b is complete and verified (branch `step9-application-prep`, commits `4fa4d26`,
+`d14a8f3`, `2a4a7a9`, `2e6cea7`): the supervised browser with verifiable crash cleanup,
+the `FormSession` seam and browser-backed `fixture-form` adapter, preparation routes,
+manifest-hash approvals with automatic invalidation, handoff resolution and
+operator-reported manual receipts, plus `acceptance/forms.mjs` passing against a real
+Chromium and a loopback fixture form site (exact fields and exact resume sha256, zero
+submissions). What remains for step 9 is the `jobs-ui` review screen: posting text and
+screenshot, the selected resume, the answer set, what changed since the last review,
+approve, resolve a handoff, and report a manual completion. Nothing in step 9 submits.
+
+Steps 9b–9c in one place:
 
 The 9a core exists: `ApplicationAdapter` (registry + `manual`/`fixture`),
 `PreparationService` evidence preflight, blocking rules, immutable draft attempt manifest
