@@ -254,13 +254,16 @@ library material is stored as immutable revisions:
   bullets for the latest profile revision, and reports `pdfRendering: false`.
 - `PUT /api/library/profile` stores a validated profile (`contact`, `summary`, confirmed
   `facts`, unverified `suggestions`). Facts and suggestions are kept separate; a
-  suggestion is never rendered as a fact.
+  suggestion is never rendered as a fact. Each profile revision owns its bullet set; a
+  new revision carries the previous revision's current bullets forward unless the body
+  sets `carryBullets: false` (which is how bullets are retired).
 - `PUT /api/library/bullets` stores bullet revisions (`bulletId`, `prose`, `tags`,
   optional structured `filters`/`evidence`). Re-submitting a bullet id creates a new
   revision rather than overwriting one.
 - `PUT /api/library/template` stores a base template whose sections are `facts`,
   `tags`, or `bullets` with a slot `limit`. `GET /api/library/export` and
-  `POST /api/library/import` move the library between databases and only ever append.
+  `POST /api/library/import` move the current library (latest profiles and templates and
+  each profile's current bullets) between databases and only ever append.
 - `POST /api/resumes/render` (`jobSnapshotId`, optional profile/template revision)
   selects bullets deterministically by tag overlap with the job, fills the template's
   slots, stores a text artifact and writes a `resume_versions` row referencing the exact

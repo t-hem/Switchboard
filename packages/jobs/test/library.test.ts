@@ -73,6 +73,22 @@ test("library versions facts, bullets and templates and rejects invalid material
   assert.throws(() => store.db.prepare("UPDATE bullet_revisions SET prose='tampered'").run(), /immutable/);
 });
 
+test("a new profile revision keeps the current bullets unless told to start empty", (t) => {
+  const { library } = fixture(t);
+  const first = library.addProfile({ profileId: "primary", data: profileData });
+  library.addBullets({ profileRevisionId: first.id, bullets });
+  library.addBullets({ profileRevisionId: first.id, bullets: [{ bulletId: "b-go", prose: "Built Go services, now with Kafka.", tags: ["go"] }] });
+  const corrected = library.addProfile({ profileId: "primary", data: { ...profileData, contact: { ...profileData.contact, email: "new@example.com" } } });
+  const carried = library.bullets(corrected.id);
+  assert.equal(carried.length, 3, "correcting a contact detail must not empty the bullet library");
+  assert.equal(carried.find(bullet => bullet.bulletId === "b-go")!.prose, "Built Go services, now with Kafka.", "the current revision is carried");
+  assert.ok(carried.every(bullet => bullet.profileRevisionId === corrected.id));
+  assert.equal(library.bullets(first.id).length, 3, "the earlier revision's set is unchanged");
+
+  const fresh = library.addProfile({ profileId: "primary", data: profileData, carryBullets: false });
+  assert.equal(library.bullets(fresh.id).length, 0);
+});
+
 test("a render produces structured source and a text artifact with no invented content", (t) => {
   const { library, renderer, artifacts, snapshotId, jobId } = fixture(t);
   const profile = library.addProfile({ profileId: "primary", data: profileData });
@@ -133,6 +149,7 @@ test("library export/import round-trips into a fresh database without rewriting 
   const { library, store } = fixture(t);
   const profile = library.addProfile({ profileId: "primary", data: profileData });
   library.addBullets({ profileRevisionId: profile.id, bullets });
+  library.addBullets({ profileRevisionId: profile.id, bullets: [{ bulletId: "b-go", prose: "Built Go services, now with Kafka.", tags: ["go"] }] });
   library.addTemplate({ templateId: "base", data: templateData });
   const exported = library.exportAll();
   assert.equal(exported.profiles.length, 1);
@@ -147,6 +164,11 @@ test("library export/import round-trips into a fresh database without rewriting 
   assert.deepEqual(imported, { profiles: 1, bullets: 3, templates: 1 });
   assert.equal(library2.profiles()[0]!.data.contact.name, "Ada Lovelace");
   assert.equal(library2.bullets(library2.profiles()[0]!.id).length, 3);
+  assert.equal(library2.bullets(library2.profiles()[0]!.id).find(bullet => bullet.bulletId === "b-go")!.prose, "Built Go services, now with Kafka.");
+  // An older export listing every revision imports only the highest revision of each bullet.
+  const legacy = { ...exported, profiles: [{ ...exported.profiles[0]!, profileId: "legacy" }],
+    bullets: [...exported.bullets, { ...exported.bullets.find(bullet => bullet.bulletId === "b-go")!, revision: 1, prose: "Old prose" }] };
+  assert.deepEqual(library2.importAll(legacy), { profiles: 1, bullets: 3, templates: 1 });
   assert.throws(() => library2.importAll({ schemaVersion: 99 }), /Unsupported library export version/);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM profile_revisions").get()!.n, 1);
 });

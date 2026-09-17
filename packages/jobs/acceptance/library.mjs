@@ -94,10 +94,11 @@ try{
  const exported=await api(first.url,'/api/library/export');
  assert.equal(exported.body.profiles.length,1);
  const imported2=await api(second.url,'/api/library/import',{payload:exported.body});
- assert.deepEqual(imported2.body,{profiles:1,bullets:2,templates:1});
+ // The second profile revision carried b-support forward, so the current set is three bullets.
+ assert.deepEqual(imported2.body,{profiles:1,bullets:3,templates:1});
  const secondLibrary=await api(second.url,'/api/library');
  assert.equal(secondLibrary.body.profiles[0].data.contact.name,'Ada Lovelace');
- assert.equal(secondLibrary.body.bullets.length,2);
+ assert.equal(secondLibrary.body.bullets.length,3);
  assert.equal((await api(second.url,'/api/library/import',{payload:{schemaVersion:9}})).status,400);
 
  const dashboard=await api(first.url,'/api/dashboard');

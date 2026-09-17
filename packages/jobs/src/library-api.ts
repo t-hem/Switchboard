@@ -21,9 +21,9 @@ export function libraryRoutes(app: FastifyInstance, store: SettingsStore, dir: s
     const latest = profiles.length ? profiles[profiles.length - 1]! : null;
     return { profiles, templates, bullets: latest ? library.bullets(latest.id) : [], pdfRendering: false };
   });
-  app.put<{ Body: { profileId: string; data: unknown; evidence?: unknown } }>("/api/library/profile", {
+  app.put<{ Body: { profileId: string; data: unknown; evidence?: unknown; carryBullets?: boolean } }>("/api/library/profile", {
     schema: { body: { type: "object", additionalProperties: false, required: ["profileId", "data"],
-      properties: { profileId: { type: "string", minLength: 1, maxLength: 100 }, data: { type: "object" }, evidence: {} } } },
+      properties: { profileId: { type: "string", minLength: 1, maxLength: 100 }, data: { type: "object" }, evidence: {}, carryBullets: { type: "boolean" } } } },
   }, async req => library.addProfile(req.body));
   app.put<{ Body: { profileRevisionId: string; bullets: unknown } }>("/api/library/bullets", {
     schema: { body: { type: "object", additionalProperties: false, required: ["profileRevisionId", "bullets"],

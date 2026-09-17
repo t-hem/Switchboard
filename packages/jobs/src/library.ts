@@ -151,16 +151,27 @@ export class Library {
       WHERE b.profile_revision_id=? ORDER BY b.bullet_id`).all(profileRevisionId, profileRevisionId) as Record<string, unknown>[]).map(mapBullet);
   }
 
-  addProfile(input: { profileId: string; data: unknown; evidence?: unknown }): ProfileRevision {
+  /**
+   * Each profile revision owns its bullet set. By default a new revision carries the previous
+   * revision's current bullets forward (as new, identical bullet revisions), so correcting a
+   * contact detail never empties the library; `carryBullets: false` starts an empty set, which
+   * is how bullets are retired.
+   */
+  addProfile(input: { profileId: string; data: unknown; evidence?: unknown; carryBullets?: boolean }): ProfileRevision {
     const profileId = clean(input.profileId, 100);
     if (!profileId) throw new AppError("invalid_profile", "profileId is required");
     const data = validateProfileData(input.data);
     return transaction(this.db, () => {
-      const next = Number((this.db.prepare("SELECT max(revision) AS revision FROM profile_revisions WHERE profile_id=?").get(profileId) as Record<string, unknown>)["revision"] ?? 0) + 1;
+      const previous = this.latestProfile(profileId);
+      const next = (previous?.revision ?? 0) + 1;
       const id = randomUUID();
       this.db.prepare("INSERT INTO profile_revisions(id,profile_id,revision,data_json,evidence_json,created_at) VALUES(?,?,?,?,?,?)")
         .run(id, profileId, next, JSON.stringify(data), JSON.stringify(input.evidence ?? { source: "operator" }), new Date(this.now()).toISOString());
-      event(this.db, "library.profile", "profile", profileId, { revision: next, id }, this.now());
+      const carried = previous && input.carryBullets !== false
+        ? this.#insertBullets(id, this.bullets(previous.id).map(bullet => ({ bulletId: bullet.bulletId, prose: bullet.prose, tags: bullet.tags,
+          filters: bullet.filters, evidence: { carriedFrom: bullet.id } }))).length
+        : 0;
+      event(this.db, "library.profile", "profile", profileId, { revision: next, id, carriedBullets: carried }, this.now());
       return this.profile(id)!;
     });
   }
@@ -169,18 +180,23 @@ export class Library {
     if (!profile) throw new AppError("profile_missing", "Profile revision not found", 404);
     const bullets = validateBullets(input.bullets);
     return transaction(this.db, () => {
-      const created: string[] = [];
-      for (const bullet of bullets) {
-        const next = Number((this.db.prepare("SELECT max(revision) AS revision FROM bullet_revisions WHERE bullet_id=?").get(bullet.bulletId) as Record<string, unknown>)["revision"] ?? 0) + 1;
-        const id = randomUUID();
-        this.db.prepare(`INSERT INTO bullet_revisions(id,bullet_id,revision,profile_revision_id,prose,tags_json,filters_json,evidence_json,created_at)
-          VALUES(?,?,?,?,?,?,?,?,?)`).run(id, bullet.bulletId, next, input.profileRevisionId, bullet.prose,
-          JSON.stringify(bullet.tags), JSON.stringify(bullet.filters ?? {}), JSON.stringify(bullet.evidence ?? {}), new Date(this.now()).toISOString());
-        created.push(id);
-      }
+      const created = this.#insertBullets(input.profileRevisionId, bullets);
       event(this.db, "library.bullets", "profile", profile.profileId, { count: created.length, revision: profile.revision }, this.now());
       return created.map(id => this.bullet(id)!);
     });
+  }
+  /** Appends bullet revisions; the caller owns the transaction. */
+  #insertBullets(profileRevisionId: string, bullets: BulletInput[]): string[] {
+    const created: string[] = [];
+    for (const bullet of bullets) {
+      const next = Number((this.db.prepare("SELECT max(revision) AS revision FROM bullet_revisions WHERE bullet_id=?").get(bullet.bulletId) as Record<string, unknown>)["revision"] ?? 0) + 1;
+      const id = randomUUID();
+      this.db.prepare(`INSERT INTO bullet_revisions(id,bullet_id,revision,profile_revision_id,prose,tags_json,filters_json,evidence_json,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?)`).run(id, bullet.bulletId, next, profileRevisionId, bullet.prose,
+        JSON.stringify(bullet.tags), JSON.stringify(bullet.filters ?? {}), JSON.stringify(bullet.evidence ?? {}), new Date(this.now()).toISOString());
+      created.push(id);
+    }
+    return created;
   }
   bullet(id: string): BulletRevision | null {
     const row = this.db.prepare("SELECT * FROM bullet_revisions WHERE id=?").get(id) as Record<string, unknown> | undefined;
@@ -200,11 +216,10 @@ export class Library {
     });
   }
 
+  /** The current library: latest profiles and templates, and each exported profile's current bullets. */
   exportAll(): { schemaVersion: 1; profiles: ProfileRevision[]; bullets: BulletRevision[]; templates: TemplateRevision[] } {
-    return {
-      schemaVersion: 1, profiles: this.profiles(), templates: this.templates(),
-      bullets: (this.db.prepare("SELECT * FROM bullet_revisions ORDER BY bullet_id,revision").all() as Record<string, unknown>[]).map(mapBullet),
-    };
+    const profiles = this.profiles();
+    return { schemaVersion: 1, profiles, templates: this.templates(), bullets: profiles.flatMap(profile => this.bullets(profile.id)) };
   }
   /** Importing creates new revisions; existing history is never rewritten. */
   importAll(payload: unknown): { profiles: number; bullets: number; templates: number } {
@@ -214,22 +229,26 @@ export class Library {
     const profileMapping = new Map<string, string>();
     for (const entry of (Array.isArray(value["profiles"]) ? value["profiles"] : [])) {
       const item = asRecord(entry);
-      const added = this.addProfile({ profileId: String(item["profileId"] ?? ""), data: item["data"], evidence: item["evidence"] });
+      // The import states the bullet set explicitly, so nothing is carried from a local revision.
+      const added = this.addProfile({ profileId: String(item["profileId"] ?? ""), data: item["data"], evidence: item["evidence"], carryBullets: false });
       profileMapping.set(String(item["id"] ?? ""), added.id); profiles++;
     }
     for (const entry of (Array.isArray(value["templates"]) ? value["templates"] : [])) {
       this.addTemplate({ templateId: String(asRecord(entry)["templateId"] ?? ""), data: asRecord(entry)["data"] }); templates++;
     }
-    const grouped = new Map<string, BulletInput[]>();
+    const grouped = new Map<string, Map<string, { revision: number; bullet: BulletInput }>>();
     for (const entry of (Array.isArray(value["bullets"]) ? value["bullets"] : [])) {
       const item = asRecord(entry);
       const target = profileMapping.get(String(item["profileRevisionId"] ?? ""));
       if (!target) continue;
-      const list = grouped.get(target) ?? [];
-      list.push({ bulletId: String(item["bulletId"] ?? ""), prose: String(item["prose"] ?? ""), tags: Array.isArray(item["tags"]) ? item["tags"] as string[] : [], filters: asRecord(item["filters"]), evidence: item["evidence"] });
+      // Older exports listed every revision; keep only the highest revision of each bullet.
+      const list = grouped.get(target) ?? new Map<string, { revision: number; bullet: BulletInput }>();
+      const bulletId = String(item["bulletId"] ?? ""), revision = Number(item["revision"] ?? 0);
+      if ((list.get(bulletId)?.revision ?? -Infinity) <= revision)
+        list.set(bulletId, { revision, bullet: { bulletId, prose: String(item["prose"] ?? ""), tags: Array.isArray(item["tags"]) ? item["tags"] as string[] : [], filters: asRecord(item["filters"]), evidence: item["evidence"] } });
       grouped.set(target, list);
     }
-    for (const [profileRevisionId, list] of grouped) { this.addBullets({ profileRevisionId, bullets: list }); bulletCount += list.length; }
+    for (const [profileRevisionId, list] of grouped) { this.addBullets({ profileRevisionId, bullets: [...list.values()].map(entry => entry.bullet) }); bulletCount += list.size; }
     return { profiles, bullets: bulletCount, templates };
   }
 }
