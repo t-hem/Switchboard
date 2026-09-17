@@ -308,10 +308,15 @@ Placeholders ship in `packages/jobs/personas/`; the live copies are machine-loca
 `src/runner.ts` performs the two passes: it snapshots the persona into `agent_runs`,
 writes a `0700` run directory and task file, passes the invocation argv through the
 host's literal `extraArgs`, polls retained exit state to a deadline, validates the
-result against the run's exact snapshot/profile/template revisions, and saves the
+result against the run's exact snapshot/profile/template revisions (`src/agent-result.ts`:
+heading, facts and skills must be what the profile renders, every bullet line must be the
+stored prose of a selected revision, and the edit pass may change bullet prose only through
+a declared edit whose `before` is the assembled line — the saved version is rebuilt from
+stored data, never the model's copy), and saves the
 build and edit resume versions with their tool events, messages and a durable review
 item. A successful exit without a valid result artifact is a failed stage. Failure
-modes (missing/malformed output, changed inputs, unsupported bullet, nonzero exit, lost
+modes (missing/malformed output, changed inputs, unsupported bullet, invented lines or
+headings, undeclared edits, nonzero exit, lost
 or hung session) are covered by fake-agent tests.
 
 Each stage sends a generic `idempotencyKey` (`jobs:<taskId>:<stage>`) on create, so a

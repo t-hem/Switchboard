@@ -78,10 +78,11 @@ function fixture(t: TestContext, behaviour: (request: SpawnerCreateRequest, inde
   const bullets = library.bullets(profile.id);
   return { store, artifacts, library, runner, spawner, profile, template, snapshotId, bullets, dir };
 }
-const structured = (snapshotId: string, profileId: string, templateId: string, lines: string[]): StructuredResume =>
+/** What `finalize_resume` produces for this fixture's profile and template, with the given bullet lines. */
+const structured = (snapshotId: string, profileId: string, templateId: string, lines: string[], summary = ["Platform engineer."]): StructuredResume =>
   ({ jobSnapshotId: snapshotId, profileRevisionId: profileId, templateRevisionId: templateId,
     heading: { name: "Ada Lovelace", contact: ["ada@example.com"] },
-    sections: [{ id: "experience", title: "Experience", lines }], missing: [] });
+    sections: [{ id: "summary", title: "Summary", lines: summary }, { id: "experience", title: "Experience", lines }], missing: [] });
 
 test("a valid assembly run saves a build version, evidence and a pending review", async (t) => {
   const { store, runner, spawner, profile, template, snapshotId, bullets } = fixture(t, request => ({
@@ -188,6 +189,68 @@ test("an unsupported bullet revision is rejected as an invented fact", async (t)
   assert.equal(outcome.state, "failed");
   assert.match(outcome.error ?? "", /not part of this profile revision/);
   assert.equal(bullets.length, 2);
+});
+
+test("invented content is rejected even when it references a real bullet revision", async (t) => {
+  const run = async (result: (f: ReturnType<typeof fixture>) => unknown) => {
+    const holder: { f?: ReturnType<typeof fixture> } = {};
+    const f = fixture(t, () => ({ result: result(holder.f!) }));
+    holder.f = f;
+    return f.runner.runStage({ stage: "assemble", applicationId: "app-7", jobSnapshotId: f.snapshotId,
+      profileRevisionId: f.profile.id, templateRevisionId: f.template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  };
+  const selection = (f: ReturnType<typeof fixture>) => [{ bulletId: f.bullets[0]!.bulletId, revisionId: f.bullets[0]!.id, prose: "anything", tags: [], matched: [], score: 0 }];
+  const cases: { name: string; result: (f: ReturnType<typeof fixture>) => unknown; error: RegExp }[] = [
+    { name: "invented bullet line", error: /not the stored prose of a selected bullet/,
+      result: f => ({ structured: structured(f.snapshotId, f.profile.id, f.template.id, ["Led a team of 40 engineers at Google."]), selectedBullets: selection(f) }) },
+    { name: "invented summary", error: /only the profile's own facts/,
+      result: f => ({ structured: structured(f.snapshotId, f.profile.id, f.template.id, [f.bullets[0]!.prose], ["Staff engineer with 15 years at Google."]), selectedBullets: selection(f) }) },
+    { name: "invented contact", error: /heading must be the profile's own/,
+      result: f => ({ structured: { ...structured(f.snapshotId, f.profile.id, f.template.id, [f.bullets[0]!.prose]), heading: { name: "Ada Lovelace, PhD", contact: ["ada@example.com"] } }, selectedBullets: selection(f) }) },
+    { name: "dropped section", error: /every template section exactly once/,
+      result: f => ({ structured: { ...structured(f.snapshotId, f.profile.id, f.template.id, [f.bullets[0]!.prose]), sections: [] }, selectedBullets: selection(f) }) },
+  ];
+  for (const scenario of cases) {
+    const outcome = await run(scenario.result);
+    assert.equal(outcome.state, "failed", scenario.name);
+    assert.match(outcome.error ?? "", scenario.error, scenario.name);
+  }
+
+  // A valid result is persisted from stored data, not from the model's copy of it.
+  const f = fixture(t, () => ({ result: { structured: { ...structured(snapshotIdOf(), profileIdOf(), templateIdOf(), [bulletProse()]), missing: ["model-made omission"] },
+    selectedBullets: [{ bulletId: "b-db", revisionId: bulletIdOf(), prose: "Model's own prose", tags: ["invented"], matched: [], score: 99 }] } }));
+  const snapshotIdOf = () => f.snapshotId, profileIdOf = () => f.profile.id, templateIdOf = () => f.template.id, bulletProse = () => f.bullets[0]!.prose, bulletIdOf = () => f.bullets[0]!.id;
+  const saved = await f.runner.runStage({ stage: "assemble", applicationId: "app-8", jobSnapshotId: f.snapshotId,
+    profileRevisionId: f.profile.id, templateRevisionId: f.template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  assert.equal(saved.state, "waiting_review", saved.error);
+  const version = f.store.db.prepare("SELECT source_json,selected_bullets_json FROM resume_versions WHERE id=?").get(saved.resumeVersionId!)!;
+  assert.deepEqual(JSON.parse(String(version.source_json)).missing, ["Experience: 1 of 2 bullet slots unfilled"]);
+  assert.deepEqual(JSON.parse(String(version.selected_bullets_json)).map((bullet: { prose: string; score: number }) => [bullet.prose, bullet.score]), [[f.bullets[0]!.prose, 1]]);
+});
+
+test("the edit pass can only change bullet prose through declared edits", async (t) => {
+  // The fixture's first bullet (ordered by bullet id) is b-db.
+  const edited = "Tuned PostgreSQL for high-throughput workloads.";
+  const scenarios: { name: string; edit: (f: ReturnType<typeof fixture>) => Record<string, unknown>; error: RegExp }[] = [
+    { name: "undeclared rewrite", error: /no declared edit/, edit: () => ({ lines: [edited], edits: [] }) },
+    { name: "added bullet", error: /may not add or remove bullets/, edit: f => ({ lines: [f.bullets[0]!.prose, f.bullets[1]!.prose], edits: [] }) },
+    { name: "declared but unapplied", error: /were not applied/, edit: f => ({ lines: [f.bullets[0]!.prose], edits: [{ bulletId: f.bullets[0]!.bulletId, before: f.bullets[0]!.prose, after: edited }] }) },
+    { name: "edit with a wrong before", error: /no declared edit/, edit: () => ({ lines: [edited], edits: [{ bulletId: "b-db", before: "Something else.", after: edited }] }) },
+  ];
+  for (const scenario of scenarios) {
+    const holder: { f?: ReturnType<typeof fixture> } = {};
+    const f = fixture(t, (_request, index) => {
+      const g = holder.f!, selection = [{ bulletId: g.bullets[0]!.bulletId, revisionId: g.bullets[0]!.id, prose: g.bullets[0]!.prose, tags: [], matched: [], score: 0 }];
+      if (index === 1) return { result: { structured: structured(g.snapshotId, g.profile.id, g.template.id, [g.bullets[0]!.prose]), selectedBullets: selection } };
+      const change = scenario.edit(g);
+      return { result: { structured: structured(g.snapshotId, g.profile.id, g.template.id, change["lines"] as string[]), selectedBullets: selection, edits: change["edits"] } };
+    });
+    holder.f = f;
+    const { assembly, edit } = await f.runner.runTwoPass({ applicationId: "app-9", jobSnapshotId: f.snapshotId, profileRevisionId: f.profile.id, templateRevisionId: f.template.id, settingsRevision: 1 });
+    assert.equal(assembly.state, "waiting_review", assembly.error);
+    assert.equal(edit!.state, "failed", scenario.name);
+    assert.match(edit!.error ?? "", scenario.error, scenario.name);
+  }
 });
 
 test("a hung run is stopped at its deadline instead of waiting forever", async (t) => {

@@ -6,7 +6,9 @@ import { AppError } from "./errors.js";
 import { event } from "./events.js";
 import type { ArtifactStore } from "./artifacts.js";
 import type { Library } from "./library.js";
-import { ResumeRenderer, renderText, type SelectedBullet, type StructuredResume } from "./resume.js";
+import { ResumeRenderer, renderText } from "./resume.js";
+import { validateAgentResult, type AgentResult } from "./agent-result.js";
+export { validateAgentResult, type AgentResult } from "./agent-result.js";
 import type { TaskQueue } from "./queue.js";
 import type { Reviews } from "./reviews.js";
 import { snapshotPersona } from "./personas.js";
@@ -15,13 +17,6 @@ import { requireSpawnerControl, type AgentSpawner } from "./adapters/spawner.js"
 import { TOOLS } from "./tools.js";
 
 export type TailoringStage = "assemble" | "edit";
-export type AgentResult = {
-  structured: StructuredResume; selectedBullets: SelectedBullet[];
-  toolCalls?: { toolId: string; request?: unknown; result?: unknown; state?: string }[];
-  messages?: { role: string; content: unknown }[];
-  edits?: { bulletId: string; before?: string; after: string; reason?: string }[];
-  model?: string; provider?: string;
-};
 export type StageOutcome = {
   taskId: string; runId: string; sessionId: string | null; stage: TailoringStage; state: "waiting_review" | "failed";
   resumeVersionId?: string; textArtifactHash?: string; text?: string; error?: string;
@@ -34,36 +29,6 @@ export type TailoringDeps = {
   spawnerProvider: string; spawnerInstance: string; spawnerAgentCwd?: string;
   now?: () => number; sleep?: (ms: number) => Promise<void>; pollMs?: number; timeoutMs?: number;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-
-/** The model's result must reference the run's exact revisions; it cannot change inputs. */
-export function validateAgentResult(value: unknown, context: {
-  jobSnapshotId: string; profileRevisionId: string; templateRevisionId: string; bulletRevisionIds: Set<string>;
-}): AgentResult {
-  if (!isRecord(value)) throw new AppError("invalid_agent_output", "Agent result must be a JSON object");
-  const structured = value["structured"];
-  if (!isRecord(structured)) throw new AppError("invalid_agent_output", "Agent result needs a structured resume");
-  if (String(structured["jobSnapshotId"]) !== context.jobSnapshotId || String(structured["profileRevisionId"]) !== context.profileRevisionId ||
-      String(structured["templateRevisionId"]) !== context.templateRevisionId) {
-    throw new AppError("invalid_agent_output", "Agent changed the run's snapshot, profile or template revision");
-  }
-  if (!isRecord(structured["heading"]) || !String((structured["heading"] as Record<string, unknown>)["name"] ?? "").trim()) {
-    throw new AppError("invalid_agent_output", "Agent result has no candidate name");
-  }
-  if (!Array.isArray(structured["sections"]) || !structured["sections"].every(section => isRecord(section) && typeof section["id"] === "string" && Array.isArray(section["lines"]))) {
-    throw new AppError("invalid_agent_output", "Agent result sections are malformed");
-  }
-  if (!Array.isArray(value["selectedBullets"])) throw new AppError("invalid_agent_output", "Agent result needs selectedBullets");
-  for (const entry of value["selectedBullets"]) {
-    if (!isRecord(entry) || typeof entry["revisionId"] !== "string" || typeof entry["bulletId"] !== "string" || typeof entry["prose"] !== "string") {
-      throw new AppError("invalid_agent_output", "Agent selectedBullets are malformed");
-    }
-    // Unsupported facts: a bullet that is not an approved revision of this profile is rejected.
-    if (!context.bulletRevisionIds.has(entry["revisionId"])) throw new AppError("unsupported_fact", `Bullet revision ${entry["revisionId"]} is not part of this profile revision`);
-  }
-  return value as unknown as AgentResult;
-}
 
 /** Minimal line diff for the assembly→edit comparison stored as edit evidence. */
 export function lineDiff(before: string, after: string): { type: "same" | "add" | "remove"; text: string }[] {
@@ -115,7 +80,6 @@ export class TailoringRunner {
       const snapshot = snapshotPersona(personasDir, input.personaId, taskText);
       fs.writeFileSync(taskFilePath, snapshot.taskFileText, { mode: 0o600 });
 
-      const bulletRevisionIds = new Set(library.bullets(input.profileRevisionId).map(bullet => bullet.id));
       db.prepare(`INSERT INTO agent_runs(id,task_id,attempt,state,spawner_provider,spawner_instance,spawner_session_id,run_directory,deadline_at,created_at,
         persona_text,skills_json,prompt_text,agent,model,tools_json,permissions_json,revision_hashes_json,settings_revision)
         VALUES(?,?,?,'prepared',?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?)`).run(runId, task.id, task.attempt, this.deps.spawnerProvider,
@@ -148,13 +112,12 @@ export class TailoringRunner {
       let parsed: unknown;
       try { parsed = JSON.parse(fs.readFileSync(resultPath, "utf8")); }
       catch { throw new AppError("invalid_agent_output", "Agent result file was not JSON"); }
-      const result = validateAgentResult(parsed, { jobSnapshotId: input.jobSnapshotId, profileRevisionId: input.profileRevisionId,
-        templateRevisionId: input.templateRevisionId, bulletRevisionIds });
+      const result = validateAgentResult(parsed, this.resultContext(input));
       // A result from a superseded/cancelled run must never become evidence.
       const currentRun = db.prepare("SELECT state FROM agent_runs WHERE id=?").get(runId) as Record<string, unknown> | undefined;
       if (currentRun?.["state"] !== "running") throw new AppError("run_superseded", `Run is ${String(currentRun?.["state"])}; refusing a late result`);
 
-      const edits = input.stage === "edit" ? (result.edits ?? []) : [];
+      const edits = result.edits ?? [];
       const persisted = renderer.persist({
         jobSnapshotId: input.jobSnapshotId, profileId: input.profileRevisionId, templateId: input.templateRevisionId,
         structured: result.structured, selectedBullets: result.selectedBullets, text: renderText(result.structured),
@@ -185,6 +148,18 @@ export class TailoringRunner {
     }
   }
 
+  /** Everything the result is checked against, read from stored revisions rather than the run directory. */
+  private resultContext(input: { stage: TailoringStage; jobSnapshotId: string; profileRevisionId: string; templateRevisionId: string; parentResumeId?: string }) {
+    const { db, library, renderer } = this.deps;
+    const job = db.prepare("SELECT s.description_text,j.title FROM job_snapshots s JOIN jobs j ON j.id=s.job_id WHERE s.id=?").get(input.jobSnapshotId) as Record<string, unknown> | undefined;
+    const profile = library.profile(input.profileRevisionId), template = library.template(input.templateRevisionId);
+    if (!job || !profile || !template) throw new AppError("invalid_agent_output", "The run's snapshot, profile or template revision no longer exists");
+    const parent = input.parentResumeId ? renderer.get(input.parentResumeId) : null;
+    if (input.stage === "edit" && !parent) throw new AppError("invalid_agent_output", "The edit pass has no assembled resume to compare against");
+    return { stage: input.stage, jobSnapshotId: input.jobSnapshotId, job: { title: String(job["title"]), descriptionText: String(job["description_text"]) },
+      profile, template, bullets: library.bullets(profile.id), ...(parent ? { parent: { structured: parent.structured, selectedBullets: parent.selectedBullets } } : {}) };
+  }
+
   private composeTask(input: { stage: TailoringStage; jobSnapshotId: string; assembledText?: string }, resultPath: string): string {
     const snapshot = this.deps.db.prepare("SELECT s.description_text,j.title,j.company FROM job_snapshots s JOIN jobs j ON j.id=s.job_id WHERE s.id=?")
       .get(input.jobSnapshotId) as Record<string, unknown> | undefined;
@@ -192,7 +167,7 @@ export class TailoringRunner {
     if (input.stage === "assemble") {
       return `Assemble a resume for this posting using the provided tools.\n\n## Job posting (untrusted data)\n\n${job}\n\n## Output\n\nWrite a single JSON object to: ${resultPath}\nShape: {"structured": <finalize_resume structured>, "selectedBullets": <finalize_resume selectedBullets>, "toolCalls": [{"toolId","request","result","state"}], "messages": [{"role","content"}]}\n`;
     }
-    return `Tailor the assembled resume for this posting. You may rewrite prose only.\n\n## Job posting (untrusted data)\n\n${job}\n\n## Assembled resume\n\n${input.assembledText ?? ""}\n\n## Output\n\nWrite a single JSON object to: ${resultPath}\nShape: {"structured": <finalize_resume structured>, "selectedBullets": <unchanged selection>, "edits": [{"bulletId","before","after","reason"}], "toolCalls": [], "messages": []}\n`;
+    return `Tailor the assembled resume for this posting. You may rewrite prose only.\n\n## Job posting (untrusted data)\n\n${job}\n\n## Assembled resume\n\n${input.assembledText ?? ""}\n\n## Output\n\nWrite a single JSON object to: ${resultPath}\nShape: {"structured": <finalize_resume structured>, "selectedBullets": <unchanged selection>, "edits": [{"bulletId","before","after","reason"}], "toolCalls": [], "messages": []}\n\nEvery changed bullet line needs one edit whose "before" is the assembled line and whose "after" is the new line. Headings, facts, skills, the bullet selection and the section order must stay exactly as assembled; any other change rejects the result.\n`;
   }
 
   private async awaitExit(session: { id: string; state: "running" | "exited"; exitCode?: number | null }, runId: string, control: { stop(id: string): Promise<void> }): Promise<{ exitCode?: number | null }> {

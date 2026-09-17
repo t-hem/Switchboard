@@ -60,7 +60,9 @@ Rules enforced in code (`src/personas.ts`):
 `finalize_resume`. They reject unknown templates/sections/bullets, duplicate bullets,
 slot-limit overflow, invalid section orders and unrenderable drafts. The model can only
 choose among existing bullet revisions and bounded layout options; it cannot invent
-prose, bullets or markup.
+prose, bullets or markup. That is enforced on the result, not only by the tools: the runner
+rejects any line that is not derivable from the stored revisions, and an edit pass may only
+change bullet prose through declared `{bulletId, before, after}` edits.
 
 **Not yet done:** these tools are not exposed to a real agent process. To do that, jobs
 must provide a **tool bridge** (a pi extension, or a scoped jobs runner) that registers
