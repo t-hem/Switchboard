@@ -1,6 +1,6 @@
 # TODO
 
-Implementation status (2026-09-16): Linux recovery steps 1a–1d are implemented,
+Implementation status (2026-09-17): Linux recovery steps 1a–1d are implemented,
 verified and deployed, including a real coding-agent self-restart. Jobs steps 2–6 are
 complete and verified on Linux: isolated scaffold, persistence, dashboard/review UI,
 posting import/capture with archived evidence, and the versioned career library with
@@ -34,12 +34,10 @@ See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has n
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.
 
-Stage work happens on branches (a second agent joined; master previously held all
-commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
-`step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`,
-`step7c-provider-registry`, `step7c-spawner-recovery`, `step8-search-filtering`,
-`step9-application-prep`, each stacked on the previous. Do not work directly on master;
-merge a verified stage branch when it is reviewable.
+**No stage branches remain.** The whole stack was fast-forwarded onto `master` on
+2026-09-17 and every stage branch was deleted locally and on the remote, because they are
+ancestors of `master`. Commit to `master`; branch per change if another agent is working in
+the same checkout. Runbook: JOBS-OPERATIONS.md.
 
 Connectors stay swappable: implement the interface, register the implementation, change
 the setting. No provider branches in workflow code, and Switchboard and the add-ons

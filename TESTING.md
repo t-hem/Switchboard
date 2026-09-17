@@ -39,7 +39,7 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 
 | Area | Covered by |
 |---|---|
-| Ring buffer, claim state machine, orphan ledger incl. PID-reuse guard, kill escalation against fakes, both platforms' `ProcessOps` | `npm test` — 64 cases (one skipped on Windows) |
+| Ring buffer, claim state machine, orphan ledger incl. PID-reuse guard, kill escalation against fakes, both platforms' `ProcessOps` | `npm test` — 79 cases (one skipped on Windows) |
 | Spawn, input/output, resize, scrollback replay across a disconnect, exit codes, delete | `packages/host/acceptance/sessions.mjs` |
 | Daemon crash → orphan reconciliation → verified kill; clean shutdown leaves nothing | `packages/host/acceptance/orphans.mjs` |
 | A real Claude Code session, asserted on the rendered screen | `packages/host/acceptance/real-agent.mjs` |
@@ -48,6 +48,17 @@ Re-runnable at any time; see [Re-running the suites](#re-running-the-suites).
 | `/config/agents` contract, drift → diff → sync, install hints, availability flip | `packages/web/acceptance/agent-sync.mjs` |
 | Takeover, 403 for a non-claimant, lockout banner, take-back | `packages/web/acceptance/claim.mjs` |
 | PWA assets, service worker, phone layout, quick-key byte sequences, Ctrl-C, jump-to-latest, the drag scrollbar | `packages/web/acceptance/mobile.mjs` |
+| Jobs settings, schema, queue fencing, reviews, screening, records, submission gates | `npm run jobs:test` — 118 cases |
+| Jobs HTTP lifecycle, auth, disabled dispatch, settings across restart | `packages/jobs/acceptance/scaffold.mjs` |
+| Discovery scheduling: due/interval, checkpoint resume, cap, backoff, pause, UTC, restart | `packages/jobs/acceptance/scheduling.mjs` |
+| Posting import and capture evidence, dedup, SSRF refusal (real Chromium) | `packages/jobs/acceptance/capture.mjs` |
+| Career library revisions, deterministic render, preserved history, client preview (real Chromium) | `packages/jobs/acceptance/library.mjs` |
+| Persona diagnostics, malformed-persona isolation, model/tool exposure | `packages/jobs/acceptance/personas.mjs` |
+| Preparation package, approval, stale-approval invalidation, handoff, manual receipt | `packages/jobs/acceptance/review.mjs` |
+| Form filling with the exact uploaded hash and zero submissions (real Chromium) | `packages/jobs/acceptance/forms.mjs` |
+| Gated submission: one send, double-click refusal, policy tightening, unknown + reconcile (real Chromium) | `packages/jobs/acceptance/submission.mjs` |
+| Records, offline export/reconstruct, health gaps, queue repair, read-only restore | `packages/jobs/acceptance/records.mjs` |
+| Fresh data directory end to end, including a jobs restart during submission ambiguity (real Chromium) | `packages/jobs/acceptance/rollout.mjs` |
 
 ---
 

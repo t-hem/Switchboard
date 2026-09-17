@@ -5,6 +5,12 @@ contract. **Everything here currently ships as placeholders.** The machinery, th
 validation and the isolation rules are real and tested; the persona prose, the tool
 bridge and the real-agent smoke are not.
 
+Status 2026-09-17: an agent child now receives `OPENROUTER_API_KEY` from
+`~/.switchboard/host.json` → `env` (verified after a host restart; see
+[JOBS-OPERATIONS.md](../../JOBS-OPERATIONS.md) for where secrets belong). The **tool bridge is
+the only remaining blocker** for a real tailoring pass; the real `--mode json` envelope also
+still needs verifying against a live CLI.
+
 ## What is committed vs machine-local
 
 - **Committed placeholders:** `packages/jobs/personas/<id>/manifest.md` and

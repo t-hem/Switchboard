@@ -34,6 +34,13 @@ Jobs and the later review loop are separate same-repository apps calling HTTP AP
 Switchboard never imports their runtime dependencies or databases. These are narrow
 revisions to the older spec's outside-repository and restart-kills-all assumptions.
 
+**Status (2026-09-17):** the jobs plan is implemented through step 11 and step 12 is partly
+done — everything is on `master`, and the stage branches are deleted. Read
+[IMPLEMENTATION-HANDOFF.md](./IMPLEMENTATION-HANDOFF.md) for current state and next steps, and
+[JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md) for install/operate/recover. The **tool bridge** is
+the one blocker for model-driven tailoring; agent API keys belong in `host.json` → `env`, never
+in `agents.json`.
+
 ## Invariants
 
 ### `agents.json` is fleet-wide and must stay portable

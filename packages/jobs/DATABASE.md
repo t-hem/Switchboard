@@ -45,9 +45,9 @@ required; unknown keys, coercion and silent field removal are prohibited at the 
 | JSON field | Type / default | Purpose and current behavior |
 |---|---|---|
 | `schemaVersion` | integer, exactly `1` | Settings document contract, separate from SQLite schema version. |
-| `enabled` | boolean, `false` | Master workflow preference. Current scaffold never dispatches any work. |
+| `enabled` | boolean, `false` | Master workflow preference. Disabled by default; enabling it lets discovery and gated submission run. |
 | `paused` | boolean, `true` | Operator pause preference, read directly from committed settings. |
-| `mode` | `draft`, `review`, or `automatic`; default `draft` | Intended automation policy. It does not enable an unimplemented capability. |
+| `mode` | `draft`, `review`, or `automatic`; default `draft` | Automation policy. `draft` never sends; `review` requires a matching approval; `automatic` additionally needs an explicit per-site opt-in. |
 | `reviewGates.discovery` | boolean, `true` | Human gate for discovered/selected opportunities. |
 | `reviewGates.resumeBuild` | boolean, `true` | Human gate for constructed resume. |
 | `reviewGates.resumeEdit` | boolean, `true` | Human gate for the separately saved editing pass. |
@@ -55,13 +55,14 @@ required; unknown keys, coercion and silent field removal are prohibited at the 
 | `reviewGates.submission` | boolean, `true` | Final human submission gate. Never supersedes adapter/site capabilities. |
 | `spawner.provider` | string, exactly `switchboard` | Configured built-in adapter ID. The factory supports injected alternatives; no arbitrary plugin loading. |
 | `spawner.baseUrl` | HTTP(S) URI, default `http://127.0.0.1:7777` | Connection base URL. Credentials, query and fragment are rejected. No startup request is sent. |
-| `spawner.agent` | nonempty string, max 100; default `claude` | Intended local CLI selection, acted on only when invocation workers are implemented. |
-| `personaDirectory` | absolute Linux path, max 4096 | Shared live persona definitions; defaults to `~/.switchboard/personas`. The scaffold does not read/execute them yet. |
+| `spawner.agent` | nonempty string, max 100; default `claude` | Local CLI selection used by the invocation adapter when the tailoring runner spawns. |
+| `personaDirectory` | absolute Linux path, max 4096 | Shared live persona definitions; defaults to `~/.switchboard/personas`. Read and validated by the jobs service at run time; never read by the host daemon. |
 
 All these fields can be edited/imported/exported through the standalone structured
-settings editor. Runtime status truthfully returns `disabled`, `paused`, or
-`unavailable` (workers not implemented), with `dispatchAvailable=false` in every case.
-The actor and committed revision will become foreign-key references on future runs.
+settings editor. Runtime status truthfully returns `disabled`, `paused`, `idle`
+or `running`, with `dispatchAvailable=false` whenever jobs are disabled or paused.
+Decisions record their actor, and screening/review decisions store the settings revision
+they were committed against.
 
 ## Migrations and recovery boundaries
 

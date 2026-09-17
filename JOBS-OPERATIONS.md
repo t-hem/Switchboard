@@ -113,6 +113,9 @@ Everything below is editable from the client; the API equivalents are listed for
   Runs checkpoint after each page, so a cap or rate limit resumes instead of restarting.
 - **Screen**: every posting gets a recorded decision with reasons. Unknown salary or location
   is *unknown*, never a mismatch, and currency is never converted.
+- **Select a resume**: the package view lists every resume rendered for that posting and
+  records your choice (`POST /api/applications/:id/resume`); a resume built for another posting
+  is refused. Preparation blocks without one.
 - **Prepare**: choose an application, adapter, form URL and answers. Preparation rechecks the
   evidence, fills the employer's own form with the supervised browser, uploads a named copy of
   the verified resume, and stops before submitting. Preview only — never the submit control.

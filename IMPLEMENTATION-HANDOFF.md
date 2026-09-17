@@ -1,334 +1,182 @@
 # Implementation handoff
 
-Updated 2026-09-16 (second agent session). Continue the approved
-[JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) stage by stage; verify, update
-docs, commit and push the branch before the next stage. The user is away and
-authorized continued work.
+Updated 2026-09-17 (third session). This is the document to read first in a new session.
+[JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) is the authoritative staged plan and log;
+[JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md) is the runbook for running and recovering the add-on;
+[TESTING.md](./TESTING.md) lists what is verified and what still needs hardware.
 
-## Branching — read this first
+## Current state
 
-A second agent joined on 2026-09-16. Until then everything was committed directly on
-`master`. From now on, stage work happens on a **branch** and `master` is not written
-to directly.
+- **Everything through step 11 is merged to `master`** (`b68bdc7`) and pushed. The merge was a
+  fast-forward; **all 11 stage branches were deleted locally and on the remote**, because they
+  are ancestors of `master`. There is no branch dance any more — commit to `master` again, or
+  branch per change if another agent is working in the same checkout.
+- The jobs add-on is complete through step 11 and **step 12 is partly done**: operating
+  procedures are written (`JOBS-OPERATIONS.md`), `acceptance/rollout.mjs` verifies a fresh data
+  directory end to end, the agent API-key path is verified, and the resume-selection gap that
+  rehearsal exposed is fixed.
+- **The one hard blocker for real, model-driven work is the tool bridge.** The runner invokes
+  the agent with `[--extension <bridge>] [--tools …] @<taskfile>` and that bridge does not
+  exist, so a live model cannot call the scoped draft tools and the two-pass tailored resume
+  cannot run. The real `--mode json` envelope is also unverified. Everything else in the
+  pipeline runs. See [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md).
 
-- Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
-  **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6),
-  **`step7a-personas-tools`** (step 7a), **`step7b-tailoring-runner`** (step 7b) and
-  **`step7c-provider-registry`** (adapter swappability), **`step7c-spawner-recovery`**
-  (host idempotency, carries the merged master display fixes) and
-  **`step8-search-filtering`** (scheduling + screening) and
-  **`step9-application-prep`** (application adapter + preparation, 9a), each stacked on
-  the previous. All push to `origin`.
-- `master` is at `3cc5add` and is intentionally behind these branches. Merge the
-  branches once reviewed; do not force-push another agent's branch.
-- Merge to `master` once a stage is verified and reviewable. Do not force-push over
-  another agent's branch; create a new branch for unrelated work.
+## Next session, in order
 
-## Merge status (2026-09-16)
-
-`origin/master`'s terminal-display fixes (`b3dc00f`, by the other agent) were merged
-into `step7c-spawner-recovery` with **no conflicts** — git auto-merged `server.ts`,
-`sessions.ts` and `TODO.md`. The idempotency work and the display/scrollback work coexist:
-`server.ts` has both `idempotencyKey` and the snapshot-mode stream path; `sessions.ts`
-has both `findByIdempotencyKey` and `supportsSnapshots`/`snapshot`. The jobs stack now
-sits on top of master's display fixes, so anything built from
-`step7c-spawner-recovery` includes them. Lower branches remain based on the older
-master; only this branch carries the merge.
+1. **Tool bridge** (blocker above), then verify the CLI JSON envelope against a live `pi`.
+2. **Finish step 12**: the full crash matrix (crash the host, crash jobs, crash both — surviving
+   children stay attachable, dead children are recorded, preparation restarts from saved
+   inputs), the affected host/platform/claim/browser regressions, a real posting captured in
+   draft-only mode to judge page extraction and resume readability, and real phone results.
+3. **Real data with the operator**: real resume/bullets/templates, real personas and prose, then
+   a real two-pass tailoring smoke on a cheap model.
+4. Non-plan items, unchanged: model scrape from scrollback (TODO #2), `model` on
+   `POST /sessions` (#3), optional ntfy alerts (#5), `agents.json` watch/reload (#6), and the
+   separate review-loop add-on ([LATER-review-loop.md](./LATER-review-loop.md)).
 
 ## Environment
 
-- Node **22.23.2** is required (`.nvmrc`); the default shell Node is v20.20.2. Prefix
-  commands with `source ~/.nvm/nvm.sh && nvm use 22.23.2`. Jobs entry points refuse an
-  unsupported Node with an actionable message.
-- The user's two reference ZIP archives (`aisuite-main.zip`, `openworker-main.zip`) are
-  untracked and must **not** be committed.
-- Live services on this machine: `switchboard.service`, `switchboard-owner.service`
-  active; `switchboard-web.timer` normally active (it was paused while editing core
-  client navigation and has been restored).
-- Never restart the tmux owner during routine upgrades. Restarting only
-  `switchboard.service` is safe and retains persistent workloads.
+- Node **22.23.2** is required (`.nvmrc`); the shell default is v20.20.2, so prefix commands
+  with `source ~/.nvm/nvm.sh && nvm use 22.23.2`. Jobs entry points refuse another Node with an
+  actionable message.
+- Live services: `switchboard.service` and `switchboard-owner.service` active;
+  `switchboard-web.timer` active. The **jobs service has no systemd unit** — start it by hand
+  with `npm run jobs:start` (port 7780, its own token in `$JOBS_DIR/service.json`).
+- **Never restart the tmux owner** during routine work. Restarting only `switchboard.service`
+  is safe and preserves persistent sessions; three live sessions survived exactly such a
+  restart on 2026-09-17 and remained attachable.
+- The checkout is shared with a second agent (Claude/Codex are sometimes running here). Prefer
+  non-disruptive operations; the tree is normally parked on `master`.
+- The operator's two reference ZIPs (`aisuite-main.zip`, `openworker-main.zip`) must **not** be
+  committed.
+- Secrets: agent API keys go in `~/.switchboard/host.json` → `env` (machine-local, read **at
+  startup only**; restart the host daemon after editing). `agents.json` is fleet-synced and must
+  never hold secrets or machine-specific absolute paths. Details and the exact commands are in
+  [JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md).
 
-## Completed and deployed
+## Verification status
 
-Linux persistent sessions, steps 1a–1d:
+Trust these; they were run on `master`.
 
-- `951366f`: independent tmux feasibility test.
-- `06d3193`: backend/registry foundation.
-- `e3477b0`: Linux persistent backend and isolated acceptance.
-- `6d38106`: actual Switchboard-created coding agent's README fix; it tested, committed,
-  built and restarted the real daemon, then continued with the same agent PID/session ID.
-- `dc0a5af`: rollout recovery fixes, browser/offline/crash acceptance and documentation.
-- `3cc5add`: current host credentials in manual config refresh; offline attach has no
-  reconciliation timer; offline terminate reconciles only its target and never creates
-  hidden tmux clients; Node 22.23.2 pin, jobs runtime guard, `npm run test:all`.
-
-`switchboard.service`, `switchboard-owner.service` and `switchboard-web.timer` are
-active. Persistent backend is enabled in machine-local `host.json`. See
-[LINUX-SESSIONS.md](./LINUX-SESSIONS.md) for exact recovery commands and
-display/ownership limitations.
-
-`node packages/host/acceptance/restart.mjs --browser` passed all cases including crashes
-in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/resize and
-mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
-retains direct shutdown behavior.
-
-## Jobs stages 2–9a
-
-Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
-dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
-installation must not pull optional jobs/browser/native dependencies onto Windows/core
-installs. Jobs has a separate package-lock; root `jobs:*` scripts are conveniences.
-
-- **Step 2** (`6b00ea5`): authenticated settings/status API, strict validation, SQLite
-  settings revisions with stale-write conflicts, disabled scheduler shell, replaceable
-  spawner observation contract, initial client.
-- **Step 3** (`857c103`): schema 2 — workflow entities, immutable historical inputs,
-  foreign keys, dedup keys, audit events, task leases/generations/fences, full agent
-  context snapshot columns; content-addressed artifacts; queue fencing; online
-  backup/restore; data CLI. Schema docs are generated by
-  `packages/jobs/scripts/document-schema.mjs`.
-- **Step 4** (verified, on branch `step4-jobs-dashboard`, commit `3cb8811`): schema 3
-  `attention_items` plus `reviews.ts`/`dashboard.ts`; optional core navigation
-  (`packages/web/src/state/useJobsConnection.ts`, `components/JobsConnection.tsx`);
-  standalone dashboard lists/details, review decisions, artifact downloads, cached
-  diagnostics. See the plan's "step 4 complete" log entry for the full verification.
-- **Step 5** (verified, on branch `step5-posting-capture`, commit `ab8e2da`):
-  `JobSourceAdapter` contract + registry, Greenhouse adapter, deterministic fixture
-  adapter, SSRF-guarded HTTP client, canonical-URL dedup and write-once snapshot
-  evidence, browser capture via an injected page backend, SQLite source registry +
-  discovery runs, authenticated import/source API, and jobs-ui import/source controls.
-  See the plan's "step 5 complete" log entry for the full verification.
-- **Step 7a** (verified, on branch `step7a-personas-tools`): machine-local persona
-  loading/validation with path containment and per-persona failure isolation, immutable
-  persona/skill/task snapshots, the scoped assembly tools over a run draft, the
-  `AgentInvocationAdapter` contract with a `pi` argv builder, committed **placeholder**
-  personas (`resume-assembler`, `resume-editor`) using `openrouter/deepseek/deepseek-v4.1-flash`,
-  and read-only `GET /api/personas`. **Read [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)
-  for exactly what the real personas/tools still need** — especially the tool bridge,
-  which does not exist yet, so the tools are not yet enforceable against a live model.
-- **Step 7b** (verified, on branch `step7b-tailoring-runner`): the two-pass workflow.
-  `TailoringRunner` creates tracked `agent_runs`, snapshots the persona before spawn,
-  writes a `0700` run dir + task file, passes argv via the host's literal `extraArgs`,
-  polls retained exit state to a deadline (stopping the owned session on timeout),
-  validates the result against the run's exact revisions, persists the build and edit
-  resume versions (parent link + edit diff) and opens a review item. `POST /api/tailoring`
-  triggers the two passes; `GET /api/runs/:id` reads one run; both need a private
-  `spawnerToken` in `service.json`. Fake-agent tests cover valid, malformed, missing,
-  changed-input, unsupported-fact, nonzero-exit, lost and hung runs.
-- **Step 9a** (verified, on branch `step9-application-prep`): `ApplicationAdapter`
-  registry (honest `manual`, deterministic `fixture`, explicit capabilities with
-  `submit:false`), and `PreparationService` evidence preflight (complete/fresh capture,
-  verified resume), blocking rules (`missing_evidence`/`stale_capture`/`missing_resume`/
-  `corrupt_resume`/`unsupported_required_fields`), an immutable draft attempt manifest
-  with an idempotency key that prevents duplicate preparation, a `source_policy` revision
-  with `submit:false`, and CAPTCHA/forbidden/manual handoffs as durable inbox items. 9b
-  adds the supervised browser, HTTP routes, review UI and fixture form server.
-- **Step 9b** (verified, on branch `step9-application-prep`): `browser.ts` (one owned
-  Chromium, profile under the jobs dir, ownership proven by `--user-data-dir` so a
-  recycled PID is dropped and a reap is only reported after the death is observed; the
-  orphan is reaped at startup and the browser is shared with posting capture),
-  `form.ts` (`FormSession` + `PuppeteerFormSession`), `fixture-form`
-  (fills, uploads a named copy of the verified resume, previews but never submits),
-  `applications.ts`/`applications-api.ts` (manifest-hash approval, automatic invalidation
-  of a stale approval, review package with `changesSinceReview`, handoff resolution,
-  manual-completion receipts). `acceptance/forms.mjs` covers it with real Chromium.
-- **Step 11** (verified, on branch `step11-records`): `records.ts` (complete application
-  record + self-contained export + offline `Records.reconstruct`), `health.ts` (storage
-  health with explicit gaps, plus `repairQueue`), the health/repair/record/export routes,
-  read-only-restore enforcement, and `data-cli` commands `health`, `export-application`,
-  `reconstruct` and `restore --read-only`.
-- **Step 10** (verified, on branch `step10-submission`): `policies.ts` (audited per-site
-  revisions: permit/forbid submission, automatic opt-in, daily cap), `submission.ts` (all
-  gates and evidence rechecked at send time, atomic intent claim, receipts as artifacts,
-  `unknown` + inbox reconciliation, startup sweep for interrupted sends), the submit and
-  reconcile routes, and UI controls for sending, reconciliation and site policy.
-- **Step 9c** (verified, on branch `step9-application-prep`): the `jobs-ui` review screen
-  (preparation form plus package view: posting text/screenshot/source link, selected resume
-  with agent run, answer set, filled fields and uploads, changes since review, approval,
-  handoff resolution, manual completion). `acceptance/review.mjs` drives the routes over
-  HTTP and checks the served screen in a real browser; it caught two defects (an unpopulated
-  application list and adapter options missing from the idempotency key).
-- **Step 8** (verified, on branch `step8-search-filtering`): discovery scheduling with
-  paginated checkpoints (resume after a cap or rate limit), `Retry-After`-aware backoff,
-  a restart-safe interval scheduler with a shared lease and bounded cycles, schema-4
-  append-only `screening_decisions`, and deterministic explainable filtering that
-  distinguishes a definite mismatch from an unstated field and never converts currency.
-- **Step 7c** (verified, on branch `step7c-spawner-recovery`): the first host change
-  since step 1, and generic: optional `idempotencyKey` on `POST /sessions` returns the
-  existing session (200) instead of a second spawn, persisted with tmux recovery
-  metadata. Jobs sends the key, rediscovers a lost-response session by key instead of
-  duplicating, and refuses a result from a superseded run. No jobs knowledge in the
-  daemon.
-- **Step 6** (verified, on branch `step6-resume-library`, commit `6ba9806`): immutable career-library
-  revisions (profile facts separated from suggestions, bullets, base templates with
-  bullet slots), deterministic and explainable bullet selection, structured text
-  resume rendering with visible omissions, authenticated library/render API, JSON
-  import/export, and a jobs-ui library editor + preview. **PDF is deferred by operator
-  decision** (`pdf_artifact_hash` stays NULL). See the plan's "step 6 complete" log
-  entry for the full verification.
-
-Step 4 verification (Node 22.23.2, Linux): `npm run jobs:build`, `npm run jobs:typecheck`,
-`npm run jobs:test` (24 tests), `npm run typecheck`, `npm test` (74 host tests) all
-passed. `node packages/jobs/acceptance/scaffold.mjs` passed. With an isolated core
-build, `WEB_DIST=/tmp/switchboard-jobs-stage4-web JOBS_BROWSER_EXECUTABLE=<chrome>
-node packages/jobs/acceptance/dashboard.mjs` reported ALL PASS for dashboard, `ui`,
-`claim` and `agent-sync`. `DATABASE.md` regenerates identically.
-
-Step 5 verification (Node 22.23.2, Linux): jobs build/typecheck and 45 jobs tests
-passed; root typecheck and 74 host tests passed.
-`JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/capture.mjs` passed
-(fixture site + real Chromium), and `scaffold.mjs` + `dashboard.mjs` still pass.
-`DATABASE.md` regenerates identically (no schema change).
-
-Step 6 verification (Node 22.23.2, Linux): jobs build/typecheck and 50 jobs tests
-passed; root typecheck and 74 host tests passed.
-`node packages/jobs/acceptance/library.mjs` passed both HTTP-only and with real
-Chromium; `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass. `DATABASE.md`
-regenerates identically (no schema change).
-
-Step 7a verification (Node 22.23.2, Linux): jobs build/typecheck and 57 jobs tests
-passed; root typecheck and 74 host tests passed. `node packages/jobs/acceptance/personas.mjs`
-passed; `library.mjs`, `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` still pass.
-
-Step 7b verification (Node 22.23.2, Linux): jobs build/typecheck and 64 jobs tests
-passed; root typecheck and 74 host tests passed. `personas.mjs`, `library.mjs`,
-`capture.mjs`, `scaffold.mjs` and `dashboard.mjs` all still pass.
-
-Step 7c verification (Node 22.23.2, Linux): host typecheck and 77 host tests (3 new
-idempotency tests); `packages/host/acceptance/idempotency.mjs` passed against a real
-daemon; `packages/host/acceptance/restart.mjs` (real tmux owner) still **ALL PASS**.
-Jobs typecheck and 67 jobs tests; all jobs acceptances pass.
-
-Commands (Node 22 on PATH):
+- Jobs: `npm run jobs:typecheck`, **118 jobs tests**, and ten acceptances —
+  `scaffold`, `scheduling`, `capture`, `library`, `personas`, `review`, `forms`, `submission`,
+  `records`, `rollout` (the last four with real Chromium against loopback fixture sites).
+- Host: `npm run typecheck`, **77 host tests**, plus `packages/host/acceptance/idempotency.mjs`
+  and `restart.mjs` (real tmux owner, ALL PASS).
+- Root: `npm test` (host), `npm run test:all` (host + jobs).
 
 ```sh
-npm run jobs:build
-npm run jobs:typecheck
-npm run jobs:test
+source ~/.nvm/nvm.sh && nvm use 22.23.2
+npm run jobs:build && npm run jobs:typecheck && npm run jobs:test
 node packages/jobs/acceptance/scaffold.mjs
-# Real-browser import/capture acceptance against a local fixture site:
-#   JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/capture.mjs
-# Browser mode needs an already-installed Chrome plus an isolated core web build:
-#   WEB_DIST=/tmp/switchboard-jobs-stage4-web \
-#   JOBS_BROWSER_EXECUTABLE=/home/thomas/.cache/puppeteer/chrome/linux-153.0.8010.36/chrome-linux64/chrome \
-#   node packages/jobs/acceptance/dashboard.mjs
-npm run typecheck
-npm test
-npm run test:all   # host + jobs
+node packages/jobs/acceptance/records.mjs
+CHROME=/home/thomas/.cache/puppeteer/chrome/linux-153.0.8010.36/chrome-linux64/chrome
+for a in forms submission rollout review capture library personas; do
+  JOBS_BROWSER_EXECUTABLE=$CHROME node packages/jobs/acceptance/$a.mjs
+done
+npm run typecheck && npm test
 ```
 
-Installed Chrome used for acceptance:
-`/home/thomas/.cache/puppeteer/chrome/linux-153.0.8010.36/chrome-linux64/chrome`.
-The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harness
-attempt supplied the printed Promise instead of the path, which was fixed. The browser
-harness explicitly focuses tabs before clicking.
+Not verified, and worth saying plainly: no real job board has been crawled, no real employer
+form has been automated, no `tailscale serve` endpoint exists, the desktop browser has never
+been opened by hand, Windows has had three runs (the last found a bug that is fixed but not
+re-verified), and the phone has had one run. See TESTING.md.
+
+## What is implemented, condensed
+
+Linux persistent sessions (host), steps 1a–1d — all on `master`:
+
+- `951366f` tmux feasibility; `06d3193` backend/registry foundation; `e3477b0` Linux persistent
+  backend + isolated acceptance; `6d38106` real self-restart by a Switchboard-created agent;
+  `dc0a5af` rollout recovery fixes and browser/offline/crash acceptance; `3cc5add` config-refresh
+  and termination fixes, Node 22.23.2 pin, jobs runtime guard, `npm run test:all`. Later,
+  `b3dc00f` (other agent) restored terminal scrollback and responsive input.
+
+Jobs add-on stages 2–12 (all merged to `master`):
+
+- **2** authenticated settings/status API, strict validation, settings revisions with
+  stale-write conflicts, initial client.
+- **3** schema 2: workflow entities, immutable historical inputs, foreign keys, audit events,
+  task leases/generations/fences, content-addressed artifacts, online backup/restore, data CLI.
+- **4** schema 3 `attention_items`, reviews and dashboard, optional core-client Jobs navigation.
+- **5** `JobSourceAdapter` registry, Greenhouse + fixture adapters, SSRF-guarded HTTP client,
+  canonical-URL dedup, write-once snapshot evidence, browser capture, source registry and
+  discovery runs.
+- **6** immutable career library (profile facts, bullets, base templates) and deterministic,
+  explainable text resume rendering. **PDF deferred by operator decision.**
+- **7a** machine-local personas with path containment and per-persona isolation, immutable
+  persona/skill snapshots, the scoped draft tools, the `AgentInvocationAdapter` contract,
+  placeholder personas. **The tool bridge is still missing — see above.**
+- **7b** `TailoringRunner`: two passes, tracked `agent_runs`, persona snapshot before spawn,
+  `0700` run dir + task file, argv through the host's literal `extraArgs`, deadline polling,
+  strict result validation against the run's revisions, build+edit resume versions, review item.
+- **7c** generic host `idempotencyKey` on `POST /sessions` (200 reuse / 201 create) persisted
+  with tmux recovery metadata; jobs rediscovers a lost-response session instead of duplicating
+  and refuses superseded results. No jobs knowledge in the daemon.
+- **8** discovery scheduling: paginated checkpoints that resume after a cap or rate limit,
+  `Retry-After`-aware backoff, restart-safe interval scheduler with a shared lease, schema-4
+  append-only `screening_decisions`, and explainable filtering that never converts currency and
+  never treats an unstated field as a mismatch.
+- **9** application preparation: `ApplicationAdapter` registry (honest `manual`, deterministic
+  `fixture`, browser-backed `fixture-form`), evidence preflight and blocking rules, immutable
+  draft attempt manifests with idempotent repeat, one supervised Chromium (ownership proven by
+  `--user-data-dir`, `killed` reported only after the death is observed, shared with capture),
+  CAPTCHA/forbidden/manual handoffs as inbox items, manifest-hash approvals, review package,
+  handoff resolution, operator-reported manual receipts, and the client review screen.
+- **10** controlled submission: `policies.ts` audited per-site revisions (permit/forbid,
+  automatic opt-in, daily cap), every gate and the evidence rechecked at send time, an
+  atomically claimed intent so double clicks and two workers cannot both send, receipts as
+  artifacts, `unknown` + explicit reconciliation for unconfirmable sends, and a startup sweep
+  that turns an interrupted send into `unknown` rather than a retry.
+- **11** `records.ts` (complete application record, self-contained export, offline
+  `Records.reconstruct`), `health.ts` (health with named gaps, `repairQueue`), the
+  health/repair/record/export routes, read-only-restore enforcement, and `data-cli` commands
+  `health`, `export-application`, `reconstruct`, `restore --read-only`.
+- **12 (partial)** `JOBS-OPERATIONS.md`, `acceptance/rollout.mjs` (fresh data directory end to
+  end, including a jobs restart during submission ambiguity), the API-key verification, and the
+  `POST /api/applications/:id/resume` fix.
 
 ## Adapter rule (operator, 2026-09-16)
 
-Every external dependency is an interface + registry factory selected by a setting.
-Adding a different agent-spawning service or CLI is **one adapter file plus a settings
-change** — never a workflow/runner/route edit, and the two apps stay black boxes (no
-host import of jobs, no jobs import of host). Use the `AgentSpawner`,
-`AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
-recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
+Every external dependency is an interface + registry factory selected by a setting. Adding a
+different agent-spawning service or CLI is **one adapter file plus a settings change** — never a
+workflow/runner/route edit. The two apps stay black boxes: no host import of jobs, no jobs
+import of host. Use `AgentSpawner`, `AgentInvocationAdapter`, `JobSourceAdapter` and
+`ApplicationAdapter` with their registries; the recipe is in
+[packages/jobs/README.md](./packages/jobs/README.md).
 
-## State as of 2026-09-17
+## Storage and implementation pointers
 
-Everything through step 11 is merged to `master` (`b68bdc7`) and pushed; all stage branches
-are deleted locally and on the remote. Operating procedures live in
-[JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md). The resume-selection gap found during the rollout
-rehearsal is fixed (`POST /api/applications/:id/resume`). `acceptance/rollout.mjs` verifies a
-fresh data directory end to end, including a jobs restart during submission ambiguity.
+`database.ts` migrates version 0/1→2→3→4 transactionally; `schema.ts` owns all SQL;
+`artifacts.ts` publishes and fsyncs before a database reference exists; `queue.ts` uses
+owner/generation/fence and refuses unresolved-child retries; `backup.ts` uses SQLite online
+backup plus a hash manifest and a disabled/paused restore; `data-cli.ts` inspects and recovers
+without bootstrapping an empty service; `reviews.ts` enforces immutable review inputs and
+version/settings conflicts; `screening.ts` and `policies.ts` own append-only decision history;
+`submission.ts` owns the send gates and reconciliation; `records.ts`/`health.ts` own history,
+export and recovery. `DATABASE.md` is generated by `packages/jobs/scripts/document-schema.mjs`,
+which rewrites only the section after the `<!-- generated-schema -->` marker — the prose above
+it is hand-maintained.
 
-## Next: finish step 12 — crash matrix, regressions, real posting
+## Deliberate gaps (do not "tidy" these)
 
-Step 9 is **complete and verified** on branch `step9-application-prep`: the supervised
-browser with verifiable crash cleanup, real form filling and upload against a fixture site
-(`acceptance/forms.mjs`), preparation/package/resolve/manual-completion/approve routes,
-manifest-hash approvals that are automatically invalidated by changed evidence or answers,
-and the `jobs-ui` review screen (`acceptance/review.mjs`, including a real-browser check of
-the served screen). Nothing in step 9 submits an application — there is deliberately no
-submission route yet.
+- No PDF output; no notifications (the durable inbox is the notification).
+- No real-site application adapter: a real target needs its own adapter file. The manual
+  handoff plus an operator-recorded receipt is the supported real-site path today.
+- No searchable company/recruiter dashboard, analytics or interview-prep agents.
+- `POST /sessions` stays claim-free; exited sessions are not auto-reaped; `label`/`extraArgs`
+  exist on spawn — all three are load-bearing for callers that do not exist yet (spec §9).
+- Retention is `retain-all`: no age-based pruning of submitted evidence or failed drafts.
 
-Step 10 is **complete and verified** on branch `step10-submission`: the adapter `submit`
-contract, per-site policy revisions (permit/forbid/automatic), every gate rechecked at send
-time, an atomically claimed intent so double clicks and two workers cannot both send,
-receipts stored as evidence, `unknown` for unconfirmable sends with explicit operator
-reconciliation, and a startup sweep that turns an interrupted send into `unknown` rather
-than a retry. `acceptance/submission.mjs` proves the cases end to end against a real
-browser and a counting loopback site. See the plan's step 10 log entry for detail.
+## Historical notes (earlier sessions)
 
-Step 11 is **complete and verified** on branch `step11-records`: complete application
-records (both resume passes, persona/prompt/skills, tool results, decisions, receipts),
-a self-contained export that `data-cli reconstruct` verifies offline with no database,
-storage health that names every gap (including no recorded backup), queue repair that
-releases expired leases but never retries an interrupted submission, and a read-only
-restore that refuses every write. `acceptance/records.mjs` covers it end to end.
-
-What remains of step 12: the full crash matrix (crash the host, crash jobs, crash both, and
-confirm surviving children stay attachable while dead ones are recorded and preparation can
-restart from saved inputs), the affected host/platform/claim/browser regressions, a real
-posting captured in draft-only mode to judge page extraction and resume readability, and real
-phone results. After those, the real-model tailoring pass — and for that the **tool bridge**
-is the blocker, not data.
-
-Step 9 in one place:
-
-The 9a core exists: `ApplicationAdapter` (registry + `manual`/`fixture`),
-`PreparationService` evidence preflight, blocking rules, immutable draft attempt manifest
-with idempotent repeat, and CAPTCHA/forbidden/manual handoffs as inbox items. 9b must add:
-the dedicated supervised browser process + profile with persisted ownership and crash
-cleanup (never the operator's daily browser), real filling/upload against a fixture form
-server (correct fields and exact uploaded file hash, **zero submissions**), the HTTP routes
-(`prepare` / package / resolve), the review screen (posting text/images, selected resume,
-answers, diff since review, source link, agent run), manual-completion receipts, and the
-acceptance that changed posting/answers invalidate a prior approval.
-
-See the previously-planned step 9 text below for details.
-
-PLAN TEXT (context): Implement one
-application-form adapter against fixtures (then a chosen real target), prepare answers
-and an optional cover letter, and build the review screen showing posting evidence,
-selected resume, answers and changes. Stop before submitting. A dedicated supervised
-browser profile, resumable needs-input tasks on login/CAPTCHA, and the rule that a phone
-link does not transfer the Linux browser session all apply here.
-
-Still outstanding, deliberately: a real-agent smoke needs the **tool bridge** and a
-verified CLI JSON envelope ([packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md));
-no PDF, **no notifications** (optional; the durable inbox already exists), no submission.
-Optional live-host confirmation for 7c: check out the 7c branch, build, then restart
-**only** `switchboard.service` (never the owner).
-
-Still outstanding from earlier stages, deliberately: no live board smoke test, no
-employer form automation, **no PDF output** (deferred until a real need appears), no
-notifications, and no application submission. Scheduled search/classification is
-step 8; submission policy is steps 9–10.
-
-Future execution controls must remain visibly unavailable until callers exist. The
-current queue is a library, not a running worker: step 7 must inventory children before
-recovery and dispatch, and step 10 must apply evidence/review/site policy before send
-intent. No jobs live service or external crawling/notifications/applications has been
-enabled.
-
-## Storage implementation pointers
-
-`database.ts` migrates version 0/1→2→3 transactionally; `schema.ts` owns SQL;
-`artifacts.ts` publishes/fsyncs before DB references; `queue.ts` uses
-owner/generation/fence and refuses unresolved-child retries; `backup.ts` uses SQLite
-online backup + hash manifest and disabled/paused restore; `data-cli.ts` provides
-inspect/backup/restore without bootstrapping an empty service; `reviews.ts` enforces
-immutable review inputs and version/settings conflict checks. Tests in
-`test/storage.test.ts` and `test/reviews.test.ts` include real killed subprocesses,
-competing processes and audit-rollback cases. Keep this handoff and DATABASE.md current
-as each stage changes the implementation.
-
-## Prior session notes (historical)
-
-- Earlier work verified the combined acceptance runner: it initially reused a host claim
-  (fixed by restarting disposable hosts per suite), then supplied fixture0/1/2 labels to
-  agent-sync, which requires alpha/bravo/charlie (fixed).
-- Storage subprocess-competition test can fail with empty stdout inside a sandbox; it
-  passes outside the sandbox. Default Node 20 produces the intended actionable pretest
-  error.
-- No live agent was interrupted during the tmux migration; the real self-upgrade test
-  session was explicitly cleaned up.
+- A second agent joined on 2026-09-16, so stage work moved to branches; their terminal-display
+  fixes (`b3dc00f`) were merged into the jobs stack with no conflicts, and on 2026-09-17 the
+  whole stack was fast-forwarded onto `master` and the branches deleted.
+- The combined acceptance runner once reused a host claim (fixed by restarting disposable hosts
+  per suite) and once supplied fixture0/1/2 labels to agent-sync, which requires
+  alpha/bravo/charlie (fixed).
+- The storage subprocess-competition test can fail with empty stdout inside a sandbox; it passes
+  outside one. Default Node 20 produces the intended actionable pretest error.
+- No live agent was interrupted during the tmux migration; the self-upgrade test session was
+  explicitly cleaned up.

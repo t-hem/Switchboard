@@ -19,3 +19,12 @@ Step 6 adds the career library and resume preview: JSON editors for the profile,
 bullet library and base template (saved as new immutable revisions), library
 export/import, and a render form that shows the rendered text, its visible omissions
 and each selected bullet's matched tags. PDF output is not implemented yet.
+
+Steps 8–12 add candidate screening with skip/requeue reasons, **Application preparation**
+(a prepare form plus a review package showing the posting text, screenshot, source link,
+selected resume with its agent run, the answer set, filled fields and uploads, and what
+changed since the last review), resume selection for an application, manifest approval,
+handoff resolution, an explicit external-action Send control, a **Submissions** list with
+reconciliation for unconfirmed sends, and **Site policies** controls that record
+permit/forbid and automatic-sending revisions. Nothing is sent without an operator action
+while the review gates are on.

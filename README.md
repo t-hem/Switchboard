@@ -366,7 +366,7 @@ a host that is offline, with no reason given.
 ## Testing
 
 ```bash
-npm test          # node:test — 64 cases
+npm test          # node:test — 79 cases
 npm run typecheck
 ```
 
@@ -409,6 +409,13 @@ packages/web    React + Vite + Tailwind static client (xterm.js)
   src/hooks/useTerminal.ts xterm <-> WebSocket binding, reconnect backoff, resize
   src/components/         session list, terminal, modals, banners
   acceptance/             browser-driven acceptance
+
+packages/jobs   Linux-only optional add-on (separate service, own token, own SQLite)
+  src/adapters/           source, spawner, invocation and application adapter registries
+  src/{discovery,screening,library,resume,preparation,submission,records,health}.ts
+  src/{scheduler,queue,reviews,policies,browser,form,artifacts,backup,data-cli}.ts
+  acceptance/             disposable-service harnesses (see JOBS-OPERATIONS.md)
+packages/jobs-ui  static dashboard/settings/review client served by the jobs service
 ```
 
 ## Linux session recovery
@@ -426,10 +433,17 @@ It provides versioned settings, a dashboard, durable review decisions and eviden
 downloads, posting import with archived text/screenshot evidence (manual text or
 browser capture through a configured, already-installed Chrome), and a versioned
 career library that renders a structured text resume from your own bullets placed into
-base templates (PDF output is deferred). Agent/model tailoring, notifications and
-application submission are not implemented yet, and no live board crawl runs by
-default. Configure its origin in Switchboard Settings for an optional
-Jobs link. Enter the separate jobs token in the Jobs app itself. Root/core installation
-remains independent.
-See [packages/jobs/README.md](packages/jobs/README.md) for opt-in setup and
+base templates (PDF output is deferred), explainable screening, application preparation
+against the employer's own form through one supervised Chromium, a review package with
+manifest-hash approval, gated submission with operator reconciliation of any unconfirmed
+send, and complete records with a self-contained export that verifies offline. Scheduling,
+agent runs and submission stay off until you enable them, and enabling them disables
+nothing but dispatch. The **model-driven tailoring pass is not wired yet** — its tool
+bridge does not exist — and no live board crawl or real-site form adapter ships by
+default, so a real application is completed by hand with an operator-recorded receipt.
+Notifications and PDF are deliberately not implemented. Configure its origin in
+Switchboard Settings for an optional Jobs link. Enter the separate jobs token in the Jobs
+app itself. Root/core installation remains independent.
+See [JOBS-OPERATIONS.md](JOBS-OPERATIONS.md) for install/operate/recover,
+[packages/jobs/README.md](packages/jobs/README.md) for the API, and
 [packages/jobs/DATABASE.md](packages/jobs/DATABASE.md) for the actual schema.
