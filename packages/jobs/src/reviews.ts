@@ -42,8 +42,12 @@ export class Reviews {
       if(!row)throw new AppError("review_missing","Review item not found",404);
       const current=Number(this.db.prepare("SELECT max(revision) AS revision FROM settings_revisions").get()!["revision"]);
       const task=this.db.prepare("SELECT state FROM tasks WHERE id=?").get(String(row["task_id"]));
-      if(row["state"]!=="open"||row["version"]!==input.expectedVersion||current!==input.expectedSettingsRevision||row["settings_revision"]!==current||task?.["state"]!=="waiting_review")
-        throw new AppError("review_conflict","Review inputs, task or settings changed; refresh and request a current review",409);
+      // The client must have seen the current settings (a stale page refreshes and retries), but
+      // an item opened under older settings stays decidable: unpausing jobs, say, must not strand
+      // every pending review. The item keeps the revision it was opened under; the decision
+      // records the revision it was made under.
+      if(row["state"]!=="open"||row["version"]!==input.expectedVersion||current!==input.expectedSettingsRevision||task?.["state"]!=="waiting_review")
+        throw new AppError("review_conflict","Review inputs, task or settings changed; refresh and try again",409);
       const decisionId=randomUUID(),now=new Date().toISOString();
       this.db.prepare(`INSERT INTO review_decisions(id,subject_type,subject_id,subject_version,decision,reason,before_json,after_json,settings_revision,created_at)
         VALUES(?,?,?,?,?,?,?,?,?,?)`).run(decisionId,String(row["subject_type"]),String(row["subject_id"]),String(row["subject_version"]),input.decision,input.reason,

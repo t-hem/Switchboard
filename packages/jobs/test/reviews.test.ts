@@ -38,7 +38,7 @@ test("reviews bind immutable inputs, reject repeats and do not dispatch approved
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM review_decisions").get()!["n"],1);
 });
 
-test("changed subject, settings and task state invalidate stale reviews; failed audit rolls back",t=>{
+test("changed subject and task state invalidate stale reviews, stale clients refresh, and failed audit rolls back",t=>{
   const {store,reviews,input}=fixture(t);
   store.db.prepare("UPDATE tasks SET state='waiting_review' WHERE id='task'").run();
   const old=reviews.open(input),current=reviews.open({...input,subjectVersion:"two"});
@@ -53,9 +53,11 @@ test("changed subject, settings and task state invalidate stale reviews; failed 
   assert.throws(()=>reviews.decide(current,decision),/changed/);
   store.db.prepare("UPDATE tasks SET state='waiting_review' WHERE id='task'").run();
   store.update(1,store.current().value);
-  assert.throws(()=>reviews.decide(current,{...decision,expectedSettingsRevision:2}),/changed/);
-  const fresh=reviews.open({...input,subjectVersion:"two",settingsRevision:2});
-  reviews.decide(fresh,{...decision,expectedSettingsRevision:2});
+  assert.throws(()=>reviews.decide(current,decision),/changed/,"a client that has not seen the new settings must refresh");
+  // An item opened under older settings is still decidable once the client has refreshed.
+  const decided=reviews.decide(current,{...decision,expectedSettingsRevision:2});
+  assert.equal(store.db.prepare("SELECT settings_revision FROM review_decisions WHERE id=?").get(decided.decisionId)!["settings_revision"],2);
+  assert.equal(store.db.prepare("SELECT settings_revision FROM attention_items WHERE id=?").get(current)!["settings_revision"],1);
 });
 
 test("dashboard APIs authenticate, validate decisions and download inert verified artifacts",async t=>{
