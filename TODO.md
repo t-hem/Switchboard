@@ -8,8 +8,9 @@ bullet-based structured resume rendering (PDF deferred by operator decision). St
 (persona loading/validation, scoped tools and invocation contract) and 7b (the two-pass
 runner with tracked runs, result validation, resume versions and review items) are
 complete with **placeholder** personas/tools at model
-`openrouter/deepseek/deepseek-v4.1-flash`. Step 7c (host spawner idempotency and
-restart recovery) is next, then 8.
+`openrouter/deepseek/deepseek-v4.1-flash`; 7c added the generic host `idempotencyKey`
+(`POST /sessions`) plus jobs-side rediscovery and superseded-result refusal. Step 8
+(search scheduling, filtering, explainable queueing) is next.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.
@@ -17,8 +18,8 @@ still need) and packages/jobs/DATABASE.md for current code/schema details.
 Stage work happens on branches (a second agent joined; master previously held all
 commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
 `step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`,
-`step7c-provider-registry`, each stacked on the previous. Do not work directly on
-master; merge a verified stage branch when it is reviewable.
+`step7c-provider-registry`, `step7c-spawner-recovery`, each stacked on the previous.
+Do not work directly on master; merge a verified stage branch when it is reviewable.
 
 Connectors stay swappable: implement the interface, register the implementation, change
 the setting. No provider branches in workflow code, and Switchboard and the add-ons

@@ -1,7 +1,9 @@
 import { AppError } from "../errors.js";
 
-export type SpawnerSession = {id:string; state:"running"|"exited"; label:string; recovery?:string; exitCode?:number|null};
-export type SpawnerCreateRequest = {agent:string; cwd:string; label:string; extraArgs?:string[]; cols?:number; rows?:number};
+export type SpawnerSession = {id:string; state:"running"|"exited"; label:string; recovery?:string; exitCode?:number|null; idempotencyKey?:string|null};
+export type SpawnerCreateRequest = {agent:string; cwd:string; label:string; extraArgs?:string[]; cols?:number; rows?:number;
+  /** Generic creation key: a duplicate create must return the same session, not a second agent. */
+  idempotencyKey?:string};
 /**
  * Observation contract first, plus optional control. Control is optional and checked
  * explicitly, so a caller learns it cannot spawn rather than pretending it can. Creation
@@ -63,6 +65,7 @@ export class SwitchboardSpawner implements AgentSpawner {
       agent:request.agent, cwd:request.cwd, label:request.label,
       ...(request.extraArgs?.length?{extraArgs:request.extraArgs}:{}),
       ...(request.cols?{cols:request.cols}:{}), ...(request.rows?{rows:request.rows}:{}),
+      ...(request.idempotencyKey?{idempotencyKey:request.idempotencyKey}:{}),
     }, signal);
     return normalizeSession(value);
   }
@@ -90,7 +93,8 @@ function normalizeSession(value:unknown): SpawnerSession {
   if (typeof row["id"]!=="string" || typeof row["label"]!=="string" || !["running","exited"].includes(String(row["status"]))) throw new AppError("spawner_protocol","Invalid session",502);
   return {id:String(row["id"]),label:String(row["label"]),state:row["status"] as "running"|"exited",
     ...(typeof row["recovery"]==="string"?{recovery:row["recovery"]}:{}),
-    ...("exitCode" in row?{exitCode:row["exitCode"]===null||row["exitCode"]===undefined?null:Number(row["exitCode"])}:{})};
+    ...("exitCode" in row?{exitCode:row["exitCode"]===null||row["exitCode"]===undefined?null:Number(row["exitCode"])}:{}),
+    ...(typeof row["idempotencyKey"]==="string"?{idempotencyKey:row["idempotencyKey"]}:{})};
 }
 /**
  * Provider registry: a different agent-spawning service is one adapter file plus one

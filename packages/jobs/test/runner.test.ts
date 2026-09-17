@@ -17,16 +17,19 @@ import { registerSpawnerProvider, type AgentSpawner, type SpawnerCreateRequest, 
 import type { StructuredResume } from "../src/resume.js";
 
 const personasDir = new URL("../personas/", import.meta.url).pathname;
-type Behaviour = { state?: "running" | "exited" | "lost"; exitCode?: number | null; result?: unknown; raw?: string; write?: boolean };
+type Behaviour = { state?: "running" | "exited" | "lost"; exitCode?: number | null; result?: unknown; raw?: string; write?: boolean; responseLost?: boolean };
 class FakeSpawner implements AgentSpawner {
   readonly provider = "fake";
   readonly created: SpawnerCreateRequest[] = [];
   readonly stopped: string[] = [];
   private readonly sessions = new Map<string, SpawnerSession>();
+  /** Test hook: run before inspect returns, to stage cancellation mid-run. */
+  onInspect?: (id: string) => void;
+  finish(id: string, exitCode = 0): void { const session = this.sessions.get(id); if (session) this.sessions.set(id, { ...session, state: "exited", exitCode }); }
   constructor(private readonly behaviour: (request: SpawnerCreateRequest, index: number) => Behaviour | Promise<Behaviour>) {}
   async health() { return { available: true }; }
   async list() { return [...this.sessions.values()]; }
-  async inspect(id: string) { return this.sessions.get(id) ?? null; }
+  async inspect(id: string) { this.onInspect?.(id); return this.sessions.get(id) ?? null; }
   async create(request: SpawnerCreateRequest) {
     this.created.push(request);
     const result = await this.behaviour(request, this.created.length);
@@ -36,8 +39,11 @@ class FakeSpawner implements AgentSpawner {
       fs.writeFileSync(path.join(request.cwd, "result.json"), result.raw ?? JSON.stringify(result.result));
     }
     // A 'lost' session is created but never appears in inspect's inventory.
-    const session: SpawnerSession = { id, label: request.label, state: state === "exited" ? "exited" : "running", exitCode: result.exitCode ?? (state === "exited" ? 0 : null) };
+    const session: SpawnerSession = { id, label: request.label, state: state === "exited" ? "exited" : "running",
+      exitCode: result.exitCode ?? (state === "exited" ? 0 : null), idempotencyKey: request.idempotencyKey ?? null };
     if (state !== "lost") this.sessions.set(id, session);
+    // Simulate a lost create *response* after the host already created the session.
+    if (result.responseLost) throw new Error("socket hang up");
     return session;
   }
   async stop(id: string) { this.stopped.push(id); }
@@ -142,6 +148,34 @@ test("fake agents expose missing, malformed, unsupported, nonzero and lost failu
     assert.equal(outcome.state, "failed", scenario.name);
     assert.match(outcome.error ?? "", new RegExp(scenario.error), scenario.name);
   }
+});
+
+test("a lost create response is rediscovered by idempotency key instead of spawning twice", async (t) => {
+  const { runner, spawner, profile, template, snapshotId, bullets } = fixture(t, () => ({
+    responseLost: true, exitCode: 0,
+    result: { structured: structured(snapshotId, profile.id, template.id, [bullets[0]!.prose]),
+      selectedBullets: [{ bulletId: bullets[0]!.bulletId, revisionId: bullets[0]!.id, prose: bullets[0]!.prose, tags: bullets[0]!.tags, matched: [], score: 0 }] },
+  }));
+  const outcome = await runner.runStage({ stage: "assemble", applicationId: "app-5", jobSnapshotId: snapshotId,
+    profileRevisionId: profile.id, templateRevisionId: template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  assert.equal(outcome.state, "waiting_review", outcome.error);
+  assert.equal(spawner.created.length, 1, "no second spawn after a lost response");
+  assert.match(spawner.created[0]!.idempotencyKey!, /^jobs:[0-9a-f-]+:assemble$/);
+});
+
+test("a result from a superseded run is refused rather than saved", async (t) => {
+  const { store, runner, spawner, profile, template, snapshotId, bullets } = fixture(t, () => ({
+    state: "running",
+    result: { structured: structured(snapshotId, profile.id, template.id, [bullets[0]!.prose]),
+      selectedBullets: [{ bulletId: bullets[0]!.bulletId, revisionId: bullets[0]!.id, prose: bullets[0]!.prose, tags: bullets[0]!.tags, matched: [], score: 0 }] },
+  }));
+  // Cancel the run while the agent is still running, as a cancel path would.
+  spawner.onInspect = (id) => { store.db.prepare("UPDATE agent_runs SET state='cancelled' WHERE state='running'").run(); spawner.finish(id); };
+  const outcome = await runner.runStage({ stage: "assemble", applicationId: "app-6", jobSnapshotId: snapshotId,
+    profileRevisionId: profile.id, templateRevisionId: template.id, settingsRevision: 1, personaId: "resume-assembler" });
+  assert.equal(outcome.state, "failed");
+  assert.match(outcome.error ?? "", /late result/);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM resume_versions").get()!.n, 0);
 });
 
 test("an unsupported bullet revision is rejected as an invented fact", async (t) => {

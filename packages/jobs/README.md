@@ -213,6 +213,11 @@ item. A successful exit without a valid result artifact is a failed stage. Failu
 modes (missing/malformed output, changed inputs, unsupported bullet, nonzero exit, lost
 or hung session) are covered by fake-agent tests.
 
+Each stage sends a generic `idempotencyKey` (`jobs:<taskId>:<stage>`) on create, so a
+lost create *response* is rediscovered by key rather than spawning a second agent, and a
+result whose run is no longer `running` is refused as `run_superseded`. The key is a
+plain string on the host's `POST /sessions` — no jobs knowledge in the daemon.
+
 ```sh
 node packages/jobs/acceptance/personas.mjs
 ```

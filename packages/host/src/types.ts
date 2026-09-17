@@ -16,6 +16,12 @@ export type Session = {
   lastOutputAt: number;
   backend?: "direct" | "tmux";
   recovery?: string;
+  /**
+   * Generic, caller-supplied creation key. A second POST /sessions with the same key
+   * returns this session instead of spawning another one. Persisted with the session
+   * metadata so it survives a daemon restart on persistent backends.
+   */
+  idempotencyKey?: string | null;
 };
 
 /** Per-platform override block, keyed by `process.platform`. */

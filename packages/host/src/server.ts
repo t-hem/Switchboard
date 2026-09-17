@@ -47,6 +47,7 @@ type CreateSessionBody = {
   cols?: unknown;
   rows?: unknown;
   extraArgs?: unknown;
+  idempotencyKey?: unknown;
   label?: unknown;
 };
 
@@ -242,6 +243,14 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       if (!agent) throw new SessionError("agent is required", 400);
       if (!cwd) throw new SessionError("cwd is required", 400);
 
+      // Optional idempotency: the same key returns the same session instead of a second
+      // spawn, including a durable intent recovered after a daemon restart. 200 = reused.
+      const idempotencyKey = asString(body.idempotencyKey);
+      const existing = idempotencyKey ? deps.sessions.findByIdempotencyKey(idempotencyKey) : null;
+      if (existing) {
+        void reply.code(200);
+        return existing;
+      }
       const session = deps.sessions.create({
         agent,
         cwd,
@@ -249,6 +258,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         rows: asNumber(body.rows),
         extraArgs: asStringArray(body.extraArgs),
         label: asString(body.label),
+        idempotencyKey,
       });
       void reply.code(201);
       return session;

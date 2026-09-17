@@ -91,7 +91,7 @@ without it. CORS is permissive — the token is the gate, the tailnet is the bou
 |---|---|---|
 | `GET` | `/health` | Host label, platform, version, agent availability, session count. **No auth.** |
 | `GET` | `/sessions` | Every session on this host. |
-| `POST` | `/sessions` | `{ agent, cwd, cols?, rows?, extraArgs?, label? }` → spawns a PTY, returns the session. Validates that the agent exists *and is installed here*, and that `cwd` is an existing directory. |
+| `POST` | `/sessions` | `{ agent, cwd, cols?, rows?, extraArgs?, label?, idempotencyKey? }` → spawns a PTY, returns the session. Validates that the agent exists *and is installed here*, and that `cwd` is an existing directory. With an `idempotencyKey`, a repeat returns the existing session (`200`, no second spawn) — including a durable session recovered after a restart. This is a generic contract any add-on can use; it is never jobs-specific. |
 | `GET` | `/sessions/:id` | One session, or 404. |
 | `DELETE` | `/sessions/:id` | SIGTERM, then SIGKILL after 3s. Answers 204 immediately; escalation continues in the background. |
 | `POST` | `/control/claim` | `{ clientId, clientLabel }` → takes the single-client lock, evicting the previous holder's streams. |

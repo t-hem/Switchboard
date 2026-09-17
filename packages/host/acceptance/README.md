@@ -12,6 +12,8 @@ PID-reuse guard; these cover everything else.
 | `sessions.mjs` | Phase 1: auth, validation, spawn, input/output, resize, scrollback replay across a disconnect, multiple clients, exit codes, delete | a `bash` agent |
 | `orphans.mjs` | Daemon crash → orphan reconciliation → verified kill, and that a clean shutdown leaves nothing behind | a `bash` and a `survivor` agent |
 | `real-agent.mjs` | The spec's literal Phase 1 acceptance against a real Claude Code session, asserting on the *rendered screen* via a headless xterm | `claude` installed |
+| `idempotency.mjs` | Generic `idempotencyKey` on `POST /sessions`: duplicate reuses (200, one process), durable/absent keys spawn, invalid key rejected; starts its own daemon | nothing extra |
+| `restart.mjs` | Linux persistent sessions across SIGTERM/SIGKILL, crashes, owner/socket loss, offline CLI, and (with `--browser`) real Chromium attach/resize/takeover | tmux 3.2a+ and the owner service setup |
 
 ## Running them
 

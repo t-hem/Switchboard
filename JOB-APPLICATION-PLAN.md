@@ -1293,3 +1293,37 @@ Approved to proceed; see implementation entries below.
 - Verification: jobs build/typecheck; 65 jobs tests (one new spawner-registry test, plus
   settings-route coverage that rejects an unregistered provider and accepts a registered
   custom one); root typecheck and host tests unaffected.
+
+### 2026-09-16 — step 7c complete (spawner idempotency and restart recovery)
+
+- Adapter-swappability checkpoint committed/pushed on `step7c-provider-registry` as
+  `bec7491`. This stage's commit is the branch head of `step7c-spawner-recovery`.
+- **First host change since step 1, and deliberately generic.** `Session` gains an
+  optional `idempotencyKey`; `POST /sessions` accepts it, and a repeat returns the
+  existing session (HTTP 200) instead of spawning a second PTY. `SessionManager`
+  validates the key (`[A-Za-z0-9._:-]{1,200}`), refreshes durable intents first, then
+  searches live sessions synchronously, so check-then-create cannot interleave a
+  duplicate. The key rides on the `Session` object, so the tmux recovery registry
+  persists and recovers it with no schema-version change; the ledger/direct backend
+  keeps in-process idempotency only, which is all it can promise.
+- Jobs side: `SpawnerCreateRequest`/`SpawnerSession` carry the key through the
+  `AgentSpawner` contract; `SwitchboardSpawner` sends and reads it. `TailoringRunner`
+  passes `jobs:<taskId>:<stage>`, and on a lost create *response* rediscovers the same
+  session by key (`spawner.list()`), records `run.rediscovered` and adopts it instead of
+  spawning again. A result is refused if the run is no longer `running`
+  (`run_superseded`), so a late result from a cancelled/superseded attempt cannot become
+  evidence.
+- No jobs-specific knowledge entered the daemon, and no host import of jobs exists: the
+  key is a plain string any caller may send.
+- Verification (Node 22.23.2, Linux): host typecheck and 77 host tests (3 new
+  idempotency tests with fake backends: duplicate key reuse, durable recovery without
+  respawn, invalid key rejection). New `packages/host/acceptance/idempotency.mjs` passed
+  against a real daemon (201 then 200, one process, distinct/absent keys spawn, invalid
+  key 400). `packages/host/acceptance/restart.mjs` (real tmux owner) still reports
+  **ALL PASS**, so the change does not disturb persistent recovery. Jobs typecheck and
+  67 jobs tests (2 new: lost-response rediscovery, superseded-result refusal). All jobs
+  acceptances (`personas`, `library`, `scaffold`, `capture`, `dashboard` + `ui`/`claim`/
+  `agent-sync`) pass.
+- Not done here: a real-agent smoke (needs the tool bridge, PERSONAS.md), the live-host
+  restart confirmation (run when convenient: `git checkout <7c>`, build, restart only
+  `switchboard.service`), and the step-8 worker that will drive tailoring on a schedule.

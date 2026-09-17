@@ -126,7 +126,18 @@ export class TailoringRunner {
 
       const invocationPlan = invocation.build({ taskFilePath, resultPath, model: snapshot.persona.model, tools: snapshot.persona.tools });
       const label = `jobs:${input.applicationId}:tailor:${input.stage}:${runId}`;
-      const session = await control.create({ agent: snapshot.persona.agent, cwd: runDirectory, label, extraArgs: invocationPlan.argv });
+      const idempotencyKey = `jobs:${task.id}:${input.stage}`;
+      let session;
+      try {
+        session = await control.create({ agent: snapshot.persona.agent, cwd: runDirectory, label, extraArgs: invocationPlan.argv, idempotencyKey });
+      } catch (error) {
+        // Response loss: the host may have created the session anyway. Rediscover by the
+        // idempotency key before giving up, so a retry never leaves an untracked child.
+        const recovered = (await this.deps.spawner.list().catch(() => [])).find(entry => entry.idempotencyKey === idempotencyKey);
+        if (!recovered) throw error;
+        event(db, "run.rediscovered", "agent_run", runId, { stage: input.stage, sessionId: recovered.id }, this.now());
+        session = recovered;
+      }
       db.prepare("UPDATE agent_runs SET state='running',spawner_session_id=? WHERE id=?").run(session.id, runId);
 
       const finished = await this.awaitExit(session, runId, control);
@@ -139,6 +150,9 @@ export class TailoringRunner {
       catch { throw new AppError("invalid_agent_output", "Agent result file was not JSON"); }
       const result = validateAgentResult(parsed, { jobSnapshotId: input.jobSnapshotId, profileRevisionId: input.profileRevisionId,
         templateRevisionId: input.templateRevisionId, bulletRevisionIds });
+      // A result from a superseded/cancelled run must never become evidence.
+      const currentRun = db.prepare("SELECT state FROM agent_runs WHERE id=?").get(runId) as Record<string, unknown> | undefined;
+      if (currentRun?.["state"] !== "running") throw new AppError("run_superseded", `Run is ${String(currentRun?.["state"])}; refusing a late result`);
 
       const edits = input.stage === "edit" ? (result.edits ?? []) : [];
       const persisted = renderer.persist({

@@ -28,7 +28,15 @@ export type CreateOptions = {
   rows?: number;
   extraArgs?: string[];
   label?: string;
+  idempotencyKey?: string;
 };
+
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,200}$/;
+/** Validated so an arbitrary caller string never becomes unbounded persisted metadata. */
+export function validateIdempotencyKey(key: string): string {
+  if (!IDEMPOTENCY_KEY.test(key)) throw new SessionError("idempotencyKey must be 1-200 characters of [A-Za-z0-9._:-]", 400);
+  return key;
+}
 
 /** Thrown for conditions that map onto a specific HTTP status. */
 export class SessionError extends Error {
@@ -94,6 +102,22 @@ export class SessionManager {
     return this.#sessions.get(id)?.session ?? null;
   }
 
+  /**
+   * Atomic creation lookup: refresh durable intents first, then search live sessions.
+   * Synchronous on purpose — check-then-create has no await between it, so a duplicate
+   * request in the same daemon cannot interleave a second spawn.
+   */
+  findByIdempotencyKey(key: string): Session | null {
+    const wanted = validateIdempotencyKey(key);
+    for (const { session, handle } of this.backend.recover?.() ?? []) {
+      if (!this.#sessions.has(session.id)) this.#register(session, handle);
+    }
+    for (const runtime of this.#sessions.values()) {
+      if (runtime.session.idempotencyKey === wanted) return runtime.session;
+    }
+    return null;
+  }
+
   get count(): number {
     return this.#sessions.size;
   }
@@ -111,6 +135,12 @@ export class SessionManager {
     const cwd = validateCwd(opts.cwd);
     const cols = clampDimension(opts.cols, DEFAULT_COLS);
     const rows = clampDimension(opts.rows, DEFAULT_ROWS);
+    const idempotencyKey = opts.idempotencyKey ? validateIdempotencyKey(opts.idempotencyKey) : null;
+    // Defensive: the route checks first, but the guarantee lives here.
+    if (idempotencyKey) {
+      const existing = this.findByIdempotencyKey(idempotencyKey);
+      if (existing) return existing;
+    }
 
     const id = nanoid();
     const session: Session = {
@@ -125,6 +155,7 @@ export class SessionManager {
       rows,
       createdAt: Date.now(),
       lastOutputAt: Date.now(),
+      idempotencyKey,
     };
 
     let child: SessionHandle;

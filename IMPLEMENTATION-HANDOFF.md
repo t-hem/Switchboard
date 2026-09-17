@@ -14,8 +14,9 @@ to directly.
 - Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
   **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6),
   **`step7a-personas-tools`** (step 7a), **`step7b-tailoring-runner`** (step 7b) and
-  **`step7c-provider-registry`** (adapter swappability), each stacked on the previous.
-  All push to `origin`.
+  **`step7c-provider-registry`** (adapter swappability) and
+  **`step7c-spawner-recovery`** (host idempotency), each stacked on the previous. All
+  push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -58,7 +59,7 @@ in spawn/delete, delayed owner inventory, offline CLI, real Chromium takeover/re
 mobile viewport. Physical phone and real Windows hardware remain outstanding; Windows
 retains direct shutdown behavior.
 
-## Jobs stages 2–7b
+## Jobs stages 2–7c
 
 Created `packages/jobs` (independent Linux service) and `packages/jobs-ui` (standalone
 dashboard/settings client). They intentionally are **not** root npm workspaces: root npm
@@ -101,6 +102,12 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   triggers the two passes; `GET /api/runs/:id` reads one run; both need a private
   `spawnerToken` in `service.json`. Fake-agent tests cover valid, malformed, missing,
   changed-input, unsupported-fact, nonzero-exit, lost and hung runs.
+- **Step 7c** (verified, on branch `step7c-spawner-recovery`): the first host change
+  since step 1, and generic: optional `idempotencyKey` on `POST /sessions` returns the
+  existing session (200) instead of a second spawn, persisted with tmux recovery
+  metadata. Jobs sends the key, rediscovers a lost-response session by key instead of
+  duplicating, and refuses a result from a superseded run. No jobs knowledge in the
+  daemon.
 - **Step 6** (verified, on branch `step6-resume-library`, commit `6ba9806`): immutable career-library
   revisions (profile facts separated from suggestions, bullets, base templates with
   bullet slots), deterministic and explainable bullet selection, structured text
@@ -136,6 +143,11 @@ Step 7b verification (Node 22.23.2, Linux): jobs build/typecheck and 64 jobs tes
 passed; root typecheck and 74 host tests passed. `personas.mjs`, `library.mjs`,
 `capture.mjs`, `scaffold.mjs` and `dashboard.mjs` all still pass.
 
+Step 7c verification (Node 22.23.2, Linux): host typecheck and 77 host tests (3 new
+idempotency tests); `packages/host/acceptance/idempotency.mjs` passed against a real
+daemon; `packages/host/acceptance/restart.mjs` (real tmux owner) still **ALL PASS**.
+Jobs typecheck and 67 jobs tests; all jobs acceptances pass.
+
 Commands (Node 22 on PATH):
 
 ```sh
@@ -169,21 +181,18 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 7c — spawner idempotency and restart recovery
+## Next: step 8 — search scheduling, filtering and explainable queueing
 
-**7c** closes the spawn-response-loss window and adds recovery. Concretely: record spawn
-intent before creating a session, add a generic optional idempotency key to the host's
-`POST /sessions` (or prove an equivalent atomic lookup), persist recoverable session
-metadata, rediscover the same session after a timeout instead of spawning twice, poll
-retained exit state after a restart, reject late results from a superseded attempt, and
-prove `jobs` service kill/restart and host restart recover exactly one run.
+Read step 8 in [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md). Wire the first
+source's discovery schedule (pagination checkpoints, retry/backoff, normalized dedup)
+and scored, explainable filtering that records why each posting matched or was excluded;
+distinguish unknown salary/location from a mismatch. This is also where a real worker
+can finally drive tailoring (7b/7c are the runner and its recovery contract).
 
-This is the first stage that changes the **host daemon**, so it needs the host unit
-tests plus the restart acceptance (`packages/host/acceptance/restart.mjs`). The operator's
-placeholder decision still applies: personas/tools are placeholders, the model is
-`openrouter/deepseek/deepseek-v4.1-flash`, and the **tool bridge** plus the verified CLI
-JSON envelope are prerequisites for any real smoke
-(see [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md)).
+Still outstanding, deliberately: a real-agent smoke needs the **tool bridge** and a
+verified CLI JSON envelope ([packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md));
+no PDF, no notifications, no submission. Optional live-host confirmation for 7c: check
+out the 7c branch, build, then restart **only** `switchboard.service` (never the owner).
 
 Still outstanding from earlier stages, deliberately: no live board smoke test, no
 employer form automation, **no PDF output** (deferred until a real need appears), no
