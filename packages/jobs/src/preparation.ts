@@ -159,14 +159,23 @@ export class PreparationService {
     adapter: ApplicationAdapter, code: string, detail: string, context: Record<string, unknown>): PreparationOutcome {
     const db = this.deps.db;
     const queue = new TaskQueue(db), reviews = new Reviews(db);
-    const task = queue.enqueue({ kind: "application:needs-input", input: { applicationId: input.applicationId, code, ...context }, settingsRevision: input.settingsRevision, maxAttempts: 1 });
     const time = new Date(this.now()).toISOString();
-    transaction(db, () => {
-      db.prepare("UPDATE tasks SET state='waiting_review',updated_at=? WHERE id=?").run(time, task.id);
+    const markNeedsInput = (): void => {
       db.prepare("UPDATE applications SET state='needs_input',block_reason=?,updated_at=? WHERE id=? AND state IN('discovered','captured','screened','preparing','needs_input','review_required')")
         .run(`${code}: ${detail}`.slice(0, 500), time, input.applicationId);
+    };
+    const subjectVersion = `${code}:${context["snapshotId"]}`;
+    // Hitting the same block again (a retry against the same CAPTCHA) keeps the one inbox item.
+    if (reviews.openItem("application-handoff", input.applicationId, subjectVersion)) {
+      transaction(db, markNeedsInput);
+      return { attemptId: null, created: false, state: "needs_input", code, detail };
+    }
+    const task = queue.enqueue({ kind: "application:needs-input", input: { applicationId: input.applicationId, code, ...context }, settingsRevision: input.settingsRevision, maxAttempts: 1 });
+    transaction(db, () => {
+      db.prepare("UPDATE tasks SET state='waiting_review',updated_at=? WHERE id=?").run(time, task.id);
+      markNeedsInput();
     });
-    reviews.open({ taskId: task.id, subjectType: "application-handoff", subjectId: input.applicationId, subjectVersion: `${code}:${context["snapshotId"]}`,
+    reviews.open({ taskId: task.id, subjectType: "application-handoff", subjectId: input.applicationId, subjectVersion,
       title: `${adapter.id}: ${code}`, detail,
       context: { ...context, code, formUrl: context["formUrl"] ?? input.formUrl, answers: input.answers, adapterId: adapter.id, adapterVersion: adapter.version },
       settingsRevision: input.settingsRevision });

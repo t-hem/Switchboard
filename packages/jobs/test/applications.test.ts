@@ -111,6 +111,7 @@ test("a handoff block is resolved with the recorded context and can continue", a
   assert.ok(handoff.formUrl && handoff.answers && handoff.resumeVersionId, "the handoff carries URL, answers and resume");
   applications.resolveHandoff(applicationId, { code: "captcha", note: "Solved the challenge by hand" });
   assert.equal(applications.openHandoff(applicationId), null, "the resolved handoff is closed");
+  assert.equal(store.db.prepare("SELECT state FROM tasks WHERE kind='application:needs-input'").get()!.state, "succeeded", "its waiting task is finished too");
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM events WHERE kind='application.handoff_resolved'").get()!.n, 1);
   assert.throws(() => applications.resolveHandoff(applicationId, { note: "again" }), /no open handoff/);
 });

@@ -19,12 +19,22 @@ export class Reviews {
         .get(input.taskId,input.subjectType,input.subjectId,input.subjectVersion,input.settingsRevision);
       if(old)return String(old["id"]);
       const id=randomUUID(),now=new Date().toISOString();
-      this.db.prepare("UPDATE attention_items SET state='superseded',version=version+1,updated_at=? WHERE task_id=? AND subject_type=? AND subject_id=? AND state='open'")
-        .run(now,input.taskId,input.subjectType,input.subjectId);
+      // One open item per subject, whichever task raised it: a newer request supersedes the
+      // older one, and an older task that only existed to wait on it is cancelled with it.
+      const stale=this.db.prepare("SELECT id,task_id FROM attention_items WHERE subject_type=? AND subject_id=? AND state='open'").all(input.subjectType,input.subjectId);
+      for(const item of stale){
+        this.db.prepare("UPDATE attention_items SET state='superseded',version=version+1,updated_at=? WHERE id=?").run(now,String(item["id"]));
+        if(item["task_id"]!==input.taskId)this.db.prepare("UPDATE tasks SET state='cancelled',updated_at=? WHERE id=? AND state='waiting_review'").run(now,String(item["task_id"]));
+      }
       this.db.prepare(`INSERT INTO attention_items(id,task_id,run_id,artifact_hash,subject_type,subject_id,subject_version,title,detail,context_json,settings_revision,created_at,updated_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,input.taskId,input.runId??null,input.artifactHash??null,input.subjectType,input.subjectId,input.subjectVersion,input.title,input.detail,JSON.stringify(input.context),input.settingsRevision,now,now);
       event(this.db,"review.requested","attention",id,{taskId:input.taskId,subjectVersion:input.subjectVersion});return id;
     });
+  }
+  /** The open item for this exact subject version, so a workflow can avoid raising it twice. */
+  openItem(subjectType:string,subjectId:string,subjectVersion:string):{id:string;taskId:string}|null{
+    const row=this.db.prepare("SELECT id,task_id FROM attention_items WHERE subject_type=? AND subject_id=? AND subject_version=? AND state='open' LIMIT 1").get(subjectType,subjectId,subjectVersion);
+    return row?{id:String(row["id"]),taskId:String(row["task_id"])}:null;
   }
   decide(id:string,input:{expectedVersion:number;expectedSettingsRevision:number;decision:"approve"|"deny"|"request_changes";reason:string}):{decisionId:string}{
     return transaction(this.db,()=>{

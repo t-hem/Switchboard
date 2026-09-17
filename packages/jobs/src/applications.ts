@@ -142,13 +142,15 @@ export class Applications {
   /** Resolving a block is an operator decision recorded as an event; the caller re-prepares. */
   resolveHandoff(applicationId: string, input: { code?: string; note: string }): { handoffId: string } {
     const db = this.deps.db;
-    const row = db.prepare(`SELECT id,context_json FROM attention_items WHERE subject_type='application-handoff' AND subject_id=? AND state='open'
+    const row = db.prepare(`SELECT id,task_id,context_json FROM attention_items WHERE subject_type='application-handoff' AND subject_id=? AND state='open'
       ORDER BY created_at DESC LIMIT 1`).get(applicationId) as Record<string, unknown> | undefined;
     if (!row) throw new AppError("handoff_missing", "There is no open handoff for this application", 404);
     const time = new Date(this.now()).toISOString();
     const handoffId = String(row["id"]);
     transaction(db, () => {
       db.prepare("UPDATE attention_items SET state='resolved', version=version+1, updated_at=? WHERE id=? AND state='open'").run(time, handoffId);
+      // The task existed only to wait on this handoff, so resolving it finishes the task.
+      db.prepare("UPDATE tasks SET state='succeeded', updated_at=? WHERE id=? AND state='waiting_review'").run(time, String(row["task_id"]));
       event(db, "application.handoff_resolved", "application", applicationId, { handoffId, code: input.code ?? null, note: input.note }, this.now());
     });
     return { handoffId };

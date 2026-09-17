@@ -269,6 +269,7 @@ export class SubmissionService {
   #openReconciliation(applicationId: string, attemptId: string, detail: string, settingsRevision: number): void {
     const db = this.deps.db;
     const queue = new TaskQueue(db), reviews = new Reviews(db);
+    if (reviews.openItem("submission-reconcile", applicationId, attemptId)) return;
     const task = queue.enqueue({ kind: "application:reconcile", input: { applicationId, attemptId }, settingsRevision, maxAttempts: 1 });
     const time = new Date(this.now()).toISOString();
     transaction(db, () => db.prepare("UPDATE tasks SET state='waiting_review', updated_at=? WHERE id=?").run(time, task.id));

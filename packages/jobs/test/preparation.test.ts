@@ -138,7 +138,15 @@ test("CAPTCHA, forbidden automation and a manual adapter produce durable inbox h
     const context = JSON.parse(String(item["context_json"]));
     assert.ok(context.formUrl && context.answers && context.resumeVersionId, "the handoff carries URL, answers and resume");
   }
-  const { preparation, applicationId } = fixture(t);
+  const { preparation, applicationId, store } = fixture(t);
+  const openHandoffs = () => store.db.prepare("SELECT count(*) AS n FROM attention_items WHERE subject_type='application-handoff' AND state='open'").get()!.n;
+  const waiting = () => store.db.prepare("SELECT count(*) AS n FROM tasks WHERE kind='application:needs-input' AND state='waiting_review'").get()!.n;
+  for (let i = 0; i < 3; i++) await preparation.prepare(run(applicationId, { captcha: true }, { name: "Ada", workAuth: "yes" }));
+  assert.equal(openHandoffs(), 1, "retrying against the same CAPTCHA keeps one inbox item");
+  assert.equal(waiting(), 1);
+  await preparation.prepare(run(applicationId, { automationForbidden: true }, { name: "Ada", workAuth: "yes" }));
+  assert.equal(openHandoffs(), 1, "a different block supersedes the older item");
+  assert.equal(waiting(), 1, "and cancels the task that only waited on it");
   const manual = await preparation.prepare({ ...run(applicationId, {}, { name: "Ada" }), adapterId: "manual" });
   assert.equal(manual.code, "manual_handoff");
   assert.equal(manual.state, "needs_input");
