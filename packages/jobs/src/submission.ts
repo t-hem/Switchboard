@@ -62,6 +62,7 @@ export class SubmissionService {
 
   async submit(attemptId: string, input: { actor: string }): Promise<SubmitResult> {
     const db = this.deps.db;
+    this.sweepStale();
     const attempt = db.prepare("SELECT * FROM application_attempts WHERE id=?").get(attemptId) as Record<string, unknown> | undefined;
     if (!attempt) throw new AppError("attempt_missing", "Application attempt not found", 404);
     const applicationId = String(attempt["application_id"]);
@@ -168,12 +169,17 @@ export class SubmissionService {
 
   /**
    * A crash or timeout after the intent becomes an honest `unknown`, never a retry and never
-   * a success. Called at startup and before each send.
+   * a success. Before each send, only attempts older than the grace period are swept (a live
+   * send in this process is younger). At startup `interrupted: true` sweeps every `submitting`
+   * attempt: this process has sent nothing yet, so any of them belongs to a process that died,
+   * however recently. One jobs service per data directory is assumed.
    */
-  sweepStale(): { swept: number } {
+  sweepStale(options: { interrupted?: boolean } = {}): { swept: number } {
     const db = this.deps.db;
-    const cutoff = new Date(this.now() - this.graceMs).toISOString();
-    const stale = db.prepare("SELECT id,application_id,send_started_at FROM application_attempts WHERE state='submitting' AND send_started_at IS NOT NULL AND send_started_at < ?").all(cutoff) as Record<string, unknown>[];
+    const stale = (options.interrupted
+      ? db.prepare("SELECT id,application_id,send_started_at FROM application_attempts WHERE state='submitting'").all()
+      : db.prepare("SELECT id,application_id,send_started_at FROM application_attempts WHERE state='submitting' AND (send_started_at IS NULL OR send_started_at < ?)")
+        .all(new Date(this.now() - this.graceMs).toISOString())) as Record<string, unknown>[];
     const revision = this.deps.store.current().revision;
     for (const row of stale) {
       const attemptId = String(row["id"]), applicationId = String(row["application_id"]);

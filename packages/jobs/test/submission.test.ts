@@ -248,6 +248,23 @@ test("a crash after the intent becomes unknown at startup, never a silent retry"
   assert.equal(f.submission.sweepStale().swept, 0, "a swept attempt is not swept twice");
 });
 
+test("a restart soon after a crash still sweeps the interrupted send, and a send sweeps old ones first", async (t) => {
+  const f = await prepared(t);
+  // The service died one minute after committing the intent and was restarted at once.
+  f.store.db.prepare("UPDATE application_attempts SET state='submitting', send_started_at=? WHERE id=?").run(new Date(NOW - 60 * 1000).toISOString(), f.attemptId);
+  assert.equal(f.submission.sweepStale().swept, 0, "within the grace period an ordinary sweep leaves a possibly live send alone");
+  assert.equal(f.submission.sweepStale({ interrupted: true }).swept, 1, "at startup nothing is live, so it is interrupted however recent");
+  assert.equal(f.store.db.prepare("SELECT state FROM application_attempts WHERE id=?").get(f.attemptId)!.state, "unknown");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM attention_items WHERE subject_type='submission-reconcile' AND state='open'").get()!.n, 1);
+
+  const g = await prepared(t);
+  g.store.db.prepare("UPDATE application_attempts SET state='submitting', send_started_at=? WHERE id=?").run(new Date(NOW - 60 * 60 * 1000).toISOString(), g.attemptId);
+  const result = await g.submission.submit(g.attemptId, { actor: "operator" });
+  assert.equal(result.blocked?.code, "submission_unknown", "a stuck send is swept to unknown before the gates run, not left in progress");
+  assert.equal(g.store.db.prepare("SELECT count(*) AS n FROM attention_items WHERE subject_type='submission-reconcile' AND state='open'").get()!.n, 1);
+  assert.equal(adapterOf(g).calls, 0);
+});
+
 test("missing evidence, a corrupt resume and a superseded attempt block the send", async (t) => {
   const missing = await prepared(t, { settings: automatic });
   missing.policies.put({ adapterId: "fixture", siteUrl: FORM, capabilities: { prepare: true, fill: true, upload: true, submit: true }, restrictions: { autoSubmit: true }, reviewedBy: "operator" });

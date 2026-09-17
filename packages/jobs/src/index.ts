@@ -37,7 +37,8 @@ async function main(): Promise<void> {
   const submission=new SubmissionService({store,db:store.db,artifacts,
     http:new FetchHttpClient({allowPrivate:config.allowPrivateImport===true}),
     createSession: browser ? () => new PuppeteerFormSession(browser) : undefined});
-  const swept=submission.sweepStale();
+  // Nothing has been sent by this process yet, so every in-flight attempt was interrupted.
+  const swept=submission.sweepStale({interrupted:true});
   if(swept.swept)console.log(`Unconfirmed submissions now await reconciliation: ${swept.swept}`);
   const app=buildServer(config,store,dir,{browser});
   try { await app.listen({host:"127.0.0.1",port:config.port}); }

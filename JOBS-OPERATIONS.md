@@ -154,6 +154,10 @@ node packages/jobs/dist/data-cli.js reconstruct /path/to/export
 - Backups exclude bootstrap credentials, so a restored directory needs its own `service.json`.
 - Retention is `retain-all` with no age-based pruning: submitted evidence and failed/rejected
   drafts stay. Health names the gaps it cannot close (for example no recorded backup).
+- On startup, every application attempt still `submitting` belonged to a process that died,
+  however recently, and becomes `unknown` with a reconciliation inbox item. Before each send,
+  attempts stuck in `submitting` for more than ten minutes are swept the same way. Run one jobs
+  service per data directory.
 - Queue repair (`POST /api/queue/repair`) releases expired leases back to the queue but turns
   an interrupted submission into an explicit `unknown` — never a silent retry.
 
