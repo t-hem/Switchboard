@@ -63,13 +63,23 @@ export function readOwnership(file: string): BrowserOwnership | null {
   } catch { return null; }
 }
 
+type Launch = (options: { executablePath: string; userDataDir: string }) => Promise<Browser>;
+const launchChromium: Launch = ({ executablePath, userDataDir }) => puppeteer.launch({
+  executablePath, headless: true, userDataDir, args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+});
+
 export class SupervisedBrowser {
   private browser: Browser | null = null;
+  /** A launch in progress, shared so concurrent callers never start a second Chromium on the same profile. */
+  private launching: Promise<Browser> | null = null;
   private readonly ops: ProcessOps;
   private readonly graceMs: number;
-  constructor(private readonly options: { executablePath: string; profileDir: string; ownershipFile: string; now?: () => number; ops?: ProcessOps; graceMs?: number }) {
+  private readonly launch: Launch;
+  constructor(private readonly options: { executablePath: string; profileDir: string; ownershipFile: string; now?: () => number; ops?: ProcessOps; graceMs?: number;
+    /** Test seam for the Chromium launch; production always uses puppeteer. */ launch?: Launch }) {
     this.ops = options.ops ?? defaultProcessOps;
     this.graceMs = options.graceMs ?? 5000;
+    this.launch = options.launch ?? launchChromium;
   }
   /** Clean up our own leftovers from a previous crash before starting another browser. */
   async reapStale(): Promise<ReapOutcome> {
@@ -82,13 +92,16 @@ export class SupervisedBrowser {
   }
   async ensure(): Promise<Browser> {
     if (this.browser?.connected) return this.browser;
+    // Two requests arriving together (a capture and a prepare) must share one launch: a second
+    // launch would fail on the profile lock, or its reap could kill the first one's browser.
+    this.launching ??= this.#start().finally(() => { this.launching = null; });
+    return this.launching;
+  }
+  async #start(): Promise<Browser> {
     await this.reapStale();
     if (!fs.existsSync(this.options.executablePath)) throw new AppError("browser_unavailable", "The configured browser executable is not installed", 409);
     fs.mkdirSync(this.options.profileDir, { recursive: true, mode: 0o700 });
-    this.browser = await puppeteer.launch({
-      executablePath: this.options.executablePath, headless: true, userDataDir: this.options.profileDir,
-      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-    });
+    this.browser = await this.launch({ executablePath: this.options.executablePath, userDataDir: this.options.profileDir });
     const pid = this.browser.process()?.pid;
     if (pid) {
       const entry: BrowserOwnership = { pid, startedAt: new Date(this.options.now?.() ?? Date.now()).toISOString(),
@@ -98,6 +111,8 @@ export class SupervisedBrowser {
     return this.browser;
   }
   async close(): Promise<void> {
+    // A browser still launching would otherwise outlive the close.
+    await this.launching?.catch(() => undefined);
     if (this.browser) { await this.browser.close().catch(() => undefined); this.browser = null; }
     fs.rmSync(this.options.ownershipFile, { force: true });
   }

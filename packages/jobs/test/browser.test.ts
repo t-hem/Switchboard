@@ -81,3 +81,27 @@ test("reapStale removes the record it acted on and keeps a survivor's record", a
   assert.equal(await missing.reapStale(), "no_record");
   assert.equal(fs.existsSync(ownershipFile), false);
 });
+
+test("concurrent callers share one launch instead of starting a second browser on the same profile", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-browser-launch-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const executablePath = path.join(dir, "chrome");
+  fs.writeFileSync(executablePath, "");
+  let launches = 0, closed = 0;
+  const fake = { connected: true, process: () => null, close: async () => { closed++; } };
+  const browser = new SupervisedBrowser({ executablePath, profileDir: path.join(dir, "profile"), ownershipFile: path.join(dir, "owner.json"),
+    ops: fakeOps({ alive: false, commandLine: null }).ops,
+    launch: async () => { launches++; await new Promise(resolve => setTimeout(resolve, 20)); return fake as never; } });
+  const [first, second] = await Promise.all([browser.ensure(), browser.ensure()]);
+  assert.equal(launches, 1, "one Chromium per profile");
+  assert.equal(first, second);
+  assert.equal(await browser.ensure(), first, "a connected browser is reused");
+
+  const racing = new SupervisedBrowser({ executablePath, profileDir: path.join(dir, "profile2"), ownershipFile: path.join(dir, "owner2.json"),
+    ops: fakeOps({ alive: false, commandLine: null }).ops,
+    launch: async () => { await new Promise(resolve => setTimeout(resolve, 20)); return fake as never; } });
+  const pending = racing.ensure();
+  await racing.close();
+  await pending;
+  assert.equal(closed, 1, "closing during a launch still closes the browser it produced");
+});
