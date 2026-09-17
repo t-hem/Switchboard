@@ -1439,6 +1439,43 @@ Approved to proceed; see implementation entries below.
   form server acceptance, and manual-completion receipts. Those are 9b. Nothing in 9a
   transmits or submits anything.
 
+### 2026-09-16 — step 11 complete
+
+- `records.ts`: one application record with everything needed to review or diagnose it —
+  posting evidence, every capture, **both resume passes** with the edit linked to its build,
+  the persona/prompt/skills/model behind them, tool results and messages, every attempt with
+  its manifest, outcome and receipt, and the screening, attention and approval/denial
+  history. `exportApplication` writes a self-contained directory (record plus every artifact
+  it references, with a hash manifest) and refuses to leave a partial bundle behind;
+  `Records.reconstruct` verifies an export with **no database and no service**, so it can be
+  read offline later. The database decides what is an artifact, so manifest and approval
+  hashes are never mistaken for missing evidence.
+- `health.ts`: storage health that names gaps instead of averaging them — database integrity
+  and foreign keys, missing/corrupt artifacts, unreferenced files, staging leftovers, free
+  disk space, expired leases, unconfirmed submissions, retention counts, and an explicit
+  note when no backup has ever been recorded. `repairQueue` returns expired leases to the
+  queue (bumping the fence) but turns an interrupted submission into an explicitly `unknown`
+  task, never a retry.
+- Routes: `GET /api/health`, `POST /api/queue/repair`, `GET /api/applications/:id/record`,
+  `POST /api/applications/:id/export`. A read-only restore is marked and enforced: `/api/status`
+  reports `readOnly` and every write is refused with `read_only_archive`.
+- `data-cli.js` gains `health`, `export-application`, `reconstruct` and `restore --read-only`;
+  a backup records an `archive.backup` event so health can state when the last one happened.
+  Retention stays `retain-all` with `pruned: 0` — no silent age-based pruning — and the
+  missing backup history is surfaced as a named gap.
+- `acceptance/records.mjs` (disposable service, no browser): the record carries both passes,
+  the persona, tool results, the decision and the receipt; the export reconstructs **offline
+  through the real CLI**; a later profile change leaves the exported history pinned to its
+  original revision; health reports a missing artifact as an error and clears when restored;
+  repair releases the stale lease and refuses to retry the interrupted submission; a
+  `--read-only` restore lands disabled, refuses writes and keeps its history; and the jobs
+  service never contacts the Switchboard host, so stopping it cannot kill or claim unrelated
+  sessions. Not implemented, as specified: the full company/recruiter dashboard, analytics and
+  interview-prep work.
+
+Verified: jobs typecheck, 117 jobs tests (6 new), and `scaffold`, `scheduling`, `review`,
+`forms`, `submission`, `records`, `personas`, `library` and `capture` acceptances all pass.
+
 ### 2026-09-16 — step 10 complete
 
 Step 10 adds the send path, built so nothing is reported that was not observed.

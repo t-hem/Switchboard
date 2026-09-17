@@ -215,6 +215,14 @@ becomes `unknown` with an inbox item; `POST /api/attempts/:id/reconcile` records
 operator's explicit outcome and never resends. `GET|PUT /api/policies` manages audited
 per-site revisions (permit/forbid submission, automatic opt-in, daily cap).
 
+`GET /api/health` reports storage health and every known gap (including "no backup has ever
+been recorded"); `POST /api/queue/repair` releases expired leases but never retries an
+interrupted submission. `GET /api/applications/:id/record` is the complete record and
+`POST /api/applications/:id/export` writes a self-contained directory that
+`node packages/jobs/dist/data-cli.js reconstruct <dir>` verifies with no database and no
+service. `data-cli.js` also has `health`, `export-application` and
+`restore <archive> <dir> --read-only`, and a read-only restore refuses every write.
+
 The `jobs-ui` review screen (`Application preparation`) prepares, shows the package
 (posting text, screenshot, source link, selected resume and its agent run, the answer set,
 filled fields and uploads, what changed since the last review), approves one exact
@@ -227,6 +235,7 @@ node packages/jobs-ui/build.mjs            # the service serves packages/jobs-ui
 node packages/jobs/acceptance/review.mjs   # routes, plus the screen with JOBS_BROWSER_EXECUTABLE
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/forms.mjs
 JOBS_BROWSER_EXECUTABLE=<chrome> node packages/jobs/acceptance/submission.mjs
+node packages/jobs/acceptance/records.mjs
 ```
 
 ```sh

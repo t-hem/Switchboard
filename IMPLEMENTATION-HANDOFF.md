@@ -132,6 +132,11 @@ installs. Jobs has a separate package-lock; root `jobs:*` scripts are convenienc
   `applications.ts`/`applications-api.ts` (manifest-hash approval, automatic invalidation
   of a stale approval, review package with `changesSinceReview`, handoff resolution,
   manual-completion receipts). `acceptance/forms.mjs` covers it with real Chromium.
+- **Step 11** (verified, on branch `step11-records`): `records.ts` (complete application
+  record + self-contained export + offline `Records.reconstruct`), `health.ts` (storage
+  health with explicit gaps, plus `repairQueue`), the health/repair/record/export routes,
+  read-only-restore enforcement, and `data-cli` commands `health`, `export-application`,
+  `reconstruct` and `restore --read-only`.
 - **Step 10** (verified, on branch `step10-submission`): `policies.ts` (audited per-site
   revisions: permit/forbid submission, automatic opt-in, daily cap), `submission.ts` (all
   gates and evidence rechecked at send time, atomic intent claim, receipts as artifacts,
@@ -227,7 +232,7 @@ host import of jobs, no jobs import of host). Use the `AgentSpawner`,
 `AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
 recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
-## Next: step 11 — essential records, export and operating recovery
+## Next: step 12 — end-to-end rollout on this machine
 
 Step 9 is **complete and verified** on branch `step9-application-prep`: the supervised
 browser with verifiable crash cleanup, real form filling and upload against a fixture site
@@ -245,11 +250,17 @@ reconciliation, and a startup sweep that turns an interrupted send into `unknown
 than a retry. `acceptance/submission.mjs` proves the cases end to end against a real
 browser and a counting loopback site. See the plan's step 10 log entry for detail.
 
-Step 11 (records, export, operating recovery) is next; it must deliver per-application and
-per-run detail with all existing evidence, decision history, resume downloads and outcome,
-plus consistent backup/restore/export, storage health and queue repair controls, retaining
-submitted evidence and failed/rejected drafts by default with no silent age-based
-pruning.
+Step 11 is **complete and verified** on branch `step11-records`: complete application
+records (both resume passes, persona/prompt/skills, tool results, decisions, receipts),
+a self-contained export that `data-cli reconstruct` verifies offline with no database,
+storage health that names every gap (including no recorded backup), queue repair that
+releases expired leases but never retries an interrupted submission, and a read-only
+restore that refuses every write. `acceptance/records.mjs` covers it end to end.
+
+Step 12 (rollout) is next: install and first-run documentation, fresh-data-directory
+end-to-end verification, secrets/browser login, pause/disable, backup/restore and upgrade
+notes, keeping machine-local paths out of git and publishing the web bundle only after
+isolated acceptance passes.
 
 Step 9 in one place:
 

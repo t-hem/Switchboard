@@ -20,8 +20,11 @@ automatic invalidation of a stale approval, and the `jobs-ui` review screen
 policy revisions, every gate and the evidence rechecked at send time, an atomically claimed
 intent (double clicks and two workers cannot both send), receipts stored as evidence,
 `unknown` for unconfirmable sends with explicit operator reconciliation, and a startup sweep
-that turns an interrupted send into `unknown` rather than a retry. Step 11 (records,
-export, operating recovery) is next.
+that turns an interrupted send into `unknown` rather than a retry. Step 11 added complete
+application records (both resume passes, persona/prompt/skills, tool results, decisions,
+receipts), a self-contained export reconstructible offline with no database, storage health
+that names every gap, queue repair that never retries an interrupted submission, and a
+read-only restore that refuses writes. Step 12 (rollout) is next.
 See JOB-APPLICATION-PLAN.md for the staged log. Review-loop implementation has not started.
 See IMPLEMENTATION-HANDOFF.md, packages/jobs/PERSONAS.md (what the real personas/tools
 still need) and packages/jobs/DATABASE.md for current code/schema details.
