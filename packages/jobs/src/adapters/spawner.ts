@@ -92,8 +92,22 @@ function normalizeSession(value:unknown): SpawnerSession {
     ...(typeof row["recovery"]==="string"?{recovery:row["recovery"]}:{}),
     ...("exitCode" in row?{exitCode:row["exitCode"]===null||row["exitCode"]===undefined?null:Number(row["exitCode"])}:{})};
 }
+/**
+ * Provider registry: a different agent-spawning service is one adapter file plus one
+ * `registerSpawnerProvider` call, selected by the `spawner.provider` setting — no changes
+ * to workflow, runner or API code. The host daemon is a black box behind this contract.
+ */
+const providerFactories = new Map<string, SpawnerConstructor>();
+export function registerSpawnerProvider(id:string, factory:SpawnerConstructor): void { providerFactories.set(id, factory); }
+export function spawnerProviderIds(): string[] { return [...providerFactories.keys()].sort(); }
+export function spawnerProviderRegistered(id:string): boolean { return providerFactories.has(id); }
+/** The optional `providers` map is for tests that need an inline fixture implementation. */
 export function createSpawner(provider:string, options:SpawnerOptions,
-  providers:Readonly<Record<string,SpawnerConstructor>> = {switchboard:opts=>new SwitchboardSpawner(opts)}): AgentSpawner {
-  if (!Object.hasOwn(providers,provider)) throw new AppError("unknown_provider",`Unknown spawner provider: ${provider}`);
-  return providers[provider]!(options);
+  providers?:Readonly<Record<string,SpawnerConstructor>>): AgentSpawner {
+  const factory = providers
+    ? (Object.hasOwn(providers,provider) ? providers[provider] : undefined)
+    : providerFactories.get(provider);
+  if (!factory) throw new AppError("unknown_provider",`Unknown spawner provider: ${provider}`);
+  return factory(options);
 }
+registerSpawnerProvider("switchboard", opts => new SwitchboardSpawner(opts));

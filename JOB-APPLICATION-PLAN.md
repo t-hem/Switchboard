@@ -1270,3 +1270,26 @@ Approved to proceed; see implementation entries below.
 - Not done here: the host-side idempotency/reconnect contract and restart recovery
   (7c), the tool bridge and a real-agent smoke (see PERSONAS.md), and any scheduling or
   UI trigger for tailoring (step 8).
+
+### 2026-09-16 — adapter provider registry (swappability hardening)
+
+- Operator note (2026-09-16): connectors and bridges must be reusable contracts —
+  interface/ABC plus a registry implementation — so another agent-spawning service or
+  another CLI is one adapter file plus a setting, and the two apps stay black boxes.
+- Fixed the one place that violated it. `spawner.provider` was a JSON-schema `const`
+  pinned to `"switchboard"`, and `runner-api.ts` constructed `SwitchboardSpawner` and
+  `createInvocationAdapter("pi")` directly. Now:
+  - `adapters/spawner.ts` gains a provider registry (`registerSpawnerProvider`,
+    `spawnerProviderIds`, `spawnerProviderRegistered`, `createSpawner(id, options)`),
+    with `switchboard` registered by default.
+  - `settings.spawner.provider` and the new `settings.spawner.invocationAdapter` are
+    validated ids (optional for the latter, so existing settings stay valid); the
+    settings PUT rejects unregistered ids with `unknown_provider`.
+  - `runner-api.ts` builds the spawner and invocation adapter from settings through the
+    factories; no provider name appears in workflow, runner or route code.
+- Documented the recipe in `packages/jobs/README.md`: implement the contract, register
+  it, change one setting. No host import, no jobs import of host — the daemon remains a
+  black box behind `AgentSpawner`.
+- Verification: jobs build/typecheck; 65 jobs tests (one new spawner-registry test, plus
+  settings-route coverage that rejects an unregistered provider and accepts a registered
+  custom one); root typecheck and host tests unaffected.

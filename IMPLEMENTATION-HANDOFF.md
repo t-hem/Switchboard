@@ -13,8 +13,9 @@ to directly.
 
 - Branch for the jobs plan: **`step4-jobs-dashboard`** (step 4),
   **`step5-posting-capture`** (step 5), **`step6-resume-library`** (step 6),
-  **`step7a-personas-tools`** (step 7a) and **`step7b-tailoring-runner`** (step 7b),
-  each stacked on the previous. All push to `origin`.
+  **`step7a-personas-tools`** (step 7a), **`step7b-tailoring-runner`** (step 7b) and
+  **`step7c-provider-registry`** (adapter swappability), each stacked on the previous.
+  All push to `origin`.
 - `master` is at `3cc5add` and is intentionally behind these branches. Merge the
   branches once reviewed; do not force-push another agent's branch.
 - Merge to `master` once a stage is verified and reviewable. Do not force-push over
@@ -158,6 +159,15 @@ Installed Chrome used for acceptance:
 The installed Puppeteer 25 `executablePath()` is asynchronous; a previous harness
 attempt supplied the printed Promise instead of the path, which was fixed. The browser
 harness explicitly focuses tabs before clicking.
+
+## Adapter rule (operator, 2026-09-16)
+
+Every external dependency is an interface + registry factory selected by a setting.
+Adding a different agent-spawning service or CLI is **one adapter file plus a settings
+change** — never a workflow/runner/route edit, and the two apps stay black boxes (no
+host import of jobs, no jobs import of host). Use the `AgentSpawner`,
+`AgentInvocationAdapter` and `JobSourceAdapter` contracts and their registries; the
+recipe is in [packages/jobs/README.md](./packages/jobs/README.md).
 
 ## Next: step 7c — spawner idempotency and restart recovery
 

@@ -217,6 +217,38 @@ or hung session) are covered by fake-agent tests.
 node packages/jobs/acceptance/personas.mjs
 ```
 
+## Adapter contracts and swapping providers
+
+Every external dependency is an interface plus a registry factory. Implementations are
+injected; business/workflow code never branches on a provider, and the host daemon is a
+black box behind one contract.
+
+| Contract | Registry | Selected by |
+|---|---|---|
+| `AgentSpawner` (`src/adapters/spawner.ts`) | `registerSpawnerProvider` / `createSpawner` | `settings.spawner.provider` |
+| `AgentInvocationAdapter` (`src/invocation.ts`) | `registerInvocationAdapter` / `createInvocationAdapter` | `settings.spawner.invocationAdapter` |
+| `JobSourceAdapter` (`src/adapters/source.ts`) | `registerSourceAdapter` / `createSourceAdapter` | a source's `adapterId` |
+| `ApplicationAdapter`, `NotificationTransport` | — | planned (steps 9/10, 5) |
+
+`GET /api/sources` lists source adapters; `GET /api/personas` lists invocation adapters.
+Unknown provider ids are rejected when settings are saved
+(`error.code: "unknown_provider"`), never silently ignored. Provider config is validated
+before any work is scheduled, and secrets stay in private machine-local files, never in
+settings, exports or responses.
+
+### Add a different agent-spawning service (e.g. not Switchboard)
+
+1. Implement `AgentSpawner` in one file: `provider`, `health`, `list`, `inspect`, and
+   optionally `create`/`stop` (a spawner without control is reported as such, not faked).
+2. Call `registerSpawnerProvider("<id>", options => new YourSpawner(options))`.
+3. Set `spawner.provider` to `<id>` in settings.
+
+That is the whole change. `src/runner.ts`, the API routes and the workflow need no edits,
+and the same works in reverse: Switchboard does not import jobs, and jobs imports no host
+source. If a different agent-spawning app replaced Switchboard tomorrow, the diff is one
+adapter file. `AgentInvocationAdapter` follows the identical shape for a different CLI or
+model API.
+
 ## Local data operations (schema 3)
 
 Use the same Node 22 runtime and `JOBS_DIR` as the service:

@@ -10,6 +10,7 @@ import { ResumeRenderer, type SelectedBullet, type StructuredResume } from "../s
 import { Postings } from "../src/postings.js";
 import { DraftState, runTool, toolIds } from "../src/tools.js";
 import { createInvocationAdapter, invocationAdapterIds } from "../src/invocation.js";
+import { createSpawner, registerSpawnerProvider, spawnerProviderIds, type AgentSpawner } from "../src/adapters/spawner.js";
 import { AppError } from "../src/errors.js";
 
 const profileData = {
@@ -111,4 +112,14 @@ test("the invocation adapter selects the configured model and passes the task fi
   assert.deepEqual(adapter.parse('starting…\n{"structured":{"a":1}}\n'), { structured: { a: 1 } });
   assert.throws(() => adapter.parse("   "), /no output/);
   assert.throws(() => adapter.parse("only prose"), /no JSON object/);
+});
+
+test("a different agent-spawning service needs one adapter and a setting, not a rebuild", () => {
+  assert.ok(spawnerProviderIds().includes("switchboard"));
+  // Implementing the contract is the whole adapter: no workflow or API code changes.
+  const fake: AgentSpawner = { provider: "other-app", health: async () => ({ available: true }), list: async () => [], inspect: async () => null };
+  registerSpawnerProvider("other-app", () => fake);
+  assert.equal(createSpawner("other-app", { baseUrl: "http://127.0.0.1:1", token: "unused" }), fake);
+  assert.deepEqual(spawnerProviderIds(), ["other-app", "switchboard"]);
+  assert.throws(() => createSpawner("missing", { baseUrl: "http://127.0.0.1:1", token: "unused" }), /Unknown spawner provider/);
 });

@@ -9,7 +9,7 @@ import { TaskQueue } from "./queue.js";
 import { Reviews } from "./reviews.js";
 import { TailoringRunner } from "./runner.js";
 import { createInvocationAdapter } from "./invocation.js";
-import { SwitchboardSpawner } from "./adapters/spawner.js";
+import { createSpawner } from "./adapters/spawner.js";
 
 /**
  * Operator-triggered tailoring and run diagnostics. The runner is created lazily and only
@@ -27,8 +27,9 @@ export function runnerRoutes(app: FastifyInstance, store: SettingsStore, dir: st
     runner = new TailoringRunner({
       db, artifacts, library: new Library(db), renderer: new ResumeRenderer(db, artifacts, new Library(db)),
       queue: new TaskQueue(db), reviews: new Reviews(db), personasDir: settings.personaDirectory,
-      spawner: new SwitchboardSpawner({ baseUrl: settings.spawner.baseUrl, token: config.spawnerToken }),
-      invocation: createInvocationAdapter("pi"), dataDir: dir,
+      // Provider and invocation adapter come from settings; swapping either is a settings change.
+      spawner: createSpawner(settings.spawner.provider, { baseUrl: settings.spawner.baseUrl, token: config.spawnerToken }),
+      invocation: createInvocationAdapter(settings.spawner.invocationAdapter ?? "pi"), dataDir: dir,
       spawnerProvider: settings.spawner.provider, spawnerInstance: settings.spawner.baseUrl,
     });
     return runner;

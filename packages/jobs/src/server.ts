@@ -4,6 +4,8 @@ import { postingsRoutes, type PostingsDeps } from "./postings-api.js";
 import { libraryRoutes } from "./library-api.js";
 import { personasRoutes } from "./personas-api.js";
 import { runnerRoutes } from "./runner-api.js";
+import { spawnerProviderRegistered } from "./adapters/spawner.js";
+import { invocationAdapterIds } from "./invocation.js";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyError } from "fastify";
 import type { ServiceConfig } from "./config.js";
@@ -49,6 +51,12 @@ export function buildServer(config:ServiceConfig, store:SettingsStore, dir:strin
   app.put<{Body:{expectedRevision:number;value:Settings}}>("/api/settings",{schema:{body:settingsUpdateSchema}},async(req)=>{
     const url = new URL(req.body.value.spawner.baseUrl);
     if (url.username || url.password || url.search || url.hash) throw new AppError("invalid_settings","Use a base URL without credentials/query/fragment",400,[{path:"/spawner/baseUrl",message:"Credentials and query parameters are not allowed"}]);
+    // A provider is a registered adapter, not a free-form string: swapping it is a setting change.
+    if (!spawnerProviderRegistered(req.body.value.spawner.provider))
+      throw new AppError("unknown_provider","Spawner provider is not registered",400,[{path:"/spawner/provider",message:"No registered spawner provider by that id"}]);
+    const invocation = req.body.value.spawner.invocationAdapter;
+    if (invocation && !invocationAdapterIds().includes(invocation))
+      throw new AppError("unknown_provider","Invocation adapter is not registered",400,[{path:"/spawner/invocationAdapter",message:"No registered invocation adapter by that id"}]);
     return store.update(req.body.expectedRevision,req.body.value);
   });
   dashboardRoutes(app,store,dir);

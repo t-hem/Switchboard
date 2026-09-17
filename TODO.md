@@ -16,9 +16,14 @@ still need) and packages/jobs/DATABASE.md for current code/schema details.
 
 Stage work happens on branches (a second agent joined; master previously held all
 commits directly): `step4-jobs-dashboard`, `step5-posting-capture`,
-`step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`, each
-stacked on the previous. Do not work directly on master; merge a verified stage branch
-when it is reviewable.
+`step6-resume-library`, `step7a-personas-tools`, `step7b-tailoring-runner`,
+`step7c-provider-registry`, each stacked on the previous. Do not work directly on
+master; merge a verified stage branch when it is reviewable.
+
+Connectors stay swappable: implement the interface, register the implementation, change
+the setting. No provider branches in workflow code, and Switchboard and the add-ons
+remain black boxes to each other (no cross-imports). Recipe:
+packages/jobs/README.md.
 
 Ordered. #1 subsumes the model setting, so do it before #3.
 

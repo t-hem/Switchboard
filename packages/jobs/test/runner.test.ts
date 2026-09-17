@@ -13,7 +13,7 @@ import { Reviews } from "../src/reviews.js";
 import { TailoringRunner, lineDiff } from "../src/runner.js";
 import { buildServer } from "../src/server.js";
 import { createInvocationAdapter } from "../src/invocation.js";
-import type { AgentSpawner, SpawnerCreateRequest, SpawnerSession } from "../src/adapters/spawner.js";
+import { registerSpawnerProvider, type AgentSpawner, type SpawnerCreateRequest, type SpawnerSession } from "../src/adapters/spawner.js";
 import type { StructuredResume } from "../src/resume.js";
 
 const personasDir = new URL("../personas/", import.meta.url).pathname;
@@ -179,6 +179,15 @@ test("tailoring routes report an unconfigured spawner and unknown runs", async (
   assert.equal(unconfigured.json().error.code, "spawner_unconfigured");
   assert.equal((await app.inject({ url: "/api/runs/missing", headers })).statusCode, 404);
   assert.equal((await app.inject({ url: "/api/tailoring", method: "POST", headers, payload: { applicationId: "a" } })).statusCode, 400);
+
+  // Swapping the spawner provider is a settings change validated against the registry.
+  const current = (await app.inject({ url: "/api/settings", headers })).json();
+  const bad = structuredClone(current.value); bad.spawner.provider = "nonexistent";
+  assert.equal((await app.inject({ url: "/api/settings", method: "PUT", headers, payload: { expectedRevision: current.revision, value: bad } })).statusCode, 400);
+  const fake: AgentSpawner = { provider: "test-provider", health: async () => ({ available: true }), list: async () => [], inspect: async () => null };
+  registerSpawnerProvider("test-provider", () => fake);
+  const good = structuredClone(current.value); good.spawner.provider = "test-provider";
+  assert.equal((await app.inject({ url: "/api/settings", method: "PUT", headers, payload: { expectedRevision: current.revision, value: good } })).statusCode, 200);
 });
 
 test("line diff marks added and removed prose", () => {
