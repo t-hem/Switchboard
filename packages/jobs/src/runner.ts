@@ -140,7 +140,7 @@ export class TailoringRunner {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const current = queue.get(task.id);
-      if (error instanceof Abandoned || (error instanceof AppError && error.code === "stale_task" && current?.state !== "cancelled")) {
+      if (error instanceof Abandoned || ((options.signal?.aborted || (error instanceof AppError && ["stale_task", "stale_scheduler"].includes(error.code))) && current?.state !== "cancelled")) {
         // Stopping the service or losing the lease is not the agent failing: leave the child
         // running and the run recorded, and let recovery reattach it.
         event(db, "run.abandoned", "agent_run", runId, { stage: input.stage, reason: message }, this.now());
@@ -166,12 +166,16 @@ export class TailoringRunner {
    * Settles one blocked tailoring task after its worker died. Never guesses: an unreachable
    * spawner leaves everything as it is, and a live child is simply waited on.
    */
-  async reconcile(taskId: string): Promise<ReconcileOutcome> {
+  async reconcile(taskId: string, assertOwnership: () => void = () => undefined): Promise<ReconcileOutcome> {
+    assertOwnership();
     const { db, queue, spawner } = this.deps;
     const task = queue.get(taskId);
     if (!task || task.state !== "blocked" || !TAILORING_KINDS.includes(task.kind)) return "waiting";
     const run = db.prepare("SELECT * FROM agent_runs WHERE task_id=? ORDER BY attempt DESC LIMIT 1").get(taskId) as Record<string, unknown> | undefined;
     const runId = run ? String(run["id"]) : null;
+    // Session IDs are meaningful only at the backend which created them. A
+    // settings change must not turn an absent ID on a different host into a retry.
+    if (run && (run["spawner_provider"] !== this.deps.spawnerProvider || run["spawner_instance"] !== this.deps.spawnerInstance)) return "unreachable";
     const settle = (state: "exited" | "cancelled", outcome: Record<string, unknown>): void => {
       if (runId) db.prepare("UPDATE agent_runs SET state=?,finished_at=?,outcome_json=? WHERE id=? AND state NOT IN('exited','cancelled')")
         .run(state, new Date(this.now()).toISOString(), JSON.stringify({ reconciled: true, ...outcome }), runId);
@@ -184,6 +188,10 @@ export class TailoringRunner {
         if (!sessionId) sessionId = (await spawner.list()).find(entry => entry.idempotencyKey === sessionKey(task))?.id ?? null;
         inspected = sessionId ? await spawner.inspect(sessionId) : null;
       } catch { return "unreachable"; }
+      assertOwnership();
+      if (inspected && run["state"] !== "running") {
+        db.prepare("UPDATE agent_runs SET state='running',spawner_session_id=? WHERE id=? AND state IN('prepared','starting')").run(inspected.id, runId!);
+      }
       if (inspected?.state === "running") {
         if (this.now() >= Number(run["deadline_at"])) await spawner.stop?.(inspected.id).catch(() => undefined);
         return "waiting";

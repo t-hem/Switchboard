@@ -195,6 +195,32 @@ class SessionAdapter extends ScriptedAdapter {
   }
 }
 
+test("pause changes during browser preparation prevent the actual submit press", async t => {
+  let pressed = false;
+  let pause!: () => void;
+  class PausingAdapter extends SessionAdapter {
+    override async submit(input: unknown, context?: { session?: FormSession }): Promise<SubmitOutcome> {
+      pause();
+      return super.submit(input, context);
+    }
+  }
+  const f = await prepared(t, { adapter: () => new PausingAdapter({ outcome: "submitted" }),
+    createSession: () => sessionThatFails(() => { pressed = true; throw new Error("should not press"); }) });
+  pause = () => f.store.update(f.store.current().revision, { ...f.store.current().value, paused: true });
+  const result = await f.submission.submit(f.attemptId, { actor: "operator" });
+  assert.equal(result.blocked?.code, "jobs_paused");
+  assert.equal(pressed, false);
+  assert.equal(f.store.db.prepare("SELECT state FROM application_attempts WHERE id=?").get(f.attemptId)!.state, "approved");
+});
+
+test("failure to construct a form session releases an unsent claim", async t => {
+  const f = await prepared(t, { createSession: () => { throw new Error("browser unavailable"); } });
+  const result = await f.submission.submit(f.attemptId, { actor: "operator" });
+  assert.equal(result.state, "approved");
+  assert.match(result.blocked!.detail, /browser unavailable/);
+  assert.equal(f.store.db.prepare("SELECT send_started_at FROM application_attempts WHERE id=?").get(f.attemptId)!.send_started_at, null);
+});
+
 test("a failure after submit was pressed is unknown, never a return to approved", async (t) => {
   const f = await prepared(t, { adapter: () => new SessionAdapter({ outcome: "submitted" }),
     createSession: () => sessionThatFails(() => { throw new Error("Execution context was destroyed, most likely because of a navigation"); }) });
@@ -305,7 +331,14 @@ test("an approved state without a matching decision is refused, and the daily ca
   const capped = await prepared(t);
   capped.policies.put({ adapterId: "fixture", siteUrl: FORM, capabilities: { prepare: true, fill: true, upload: true, submit: true }, restrictions: { maxPerDay: 1 }, reviewedBy: "operator" });
   assert.equal((await capped.submission.submit(capped.attemptId, { actor: "operator" })).state, "submitted");
-  const second = await capped.preparation.prepare({ applicationId: capped.applicationId, adapterId: "fixture", formUrl: FORM, answers: { ...ANSWERS, phone: "555" }, settingsRevision: capped.store.current().revision });
+  // The cap is across applications; a completed application itself cannot be reopened.
+  await assert.rejects(() => capped.preparation.prepare({ applicationId: capped.applicationId, adapterId: "fixture", formUrl: FORM, answers: ANSWERS, settingsRevision: capped.store.current().revision }), /completed/);
+  const postings = new Postings(capped.store.db, capped.artifacts, () => NOW);
+  const next = postings.ingest({ adapterId: "fixture", company: "Acme", title: "Another Engineer", originalUrl: "https://acme.example/2", descriptionText: "Body", provenance: "browser" });
+  const snapshot = postings.recordSnapshot({ jobId: next.jobId, purpose: "discovery", fetchedUrl: "u", finalUrl: "u", descriptionText: "Body", screenshot: Buffer.from("png"), captureVersion: "browser:1", capture: {}, completeness: "complete" });
+  capped.store.db.prepare("INSERT INTO resume_versions SELECT 'resume-2',?,profile_revision_id,template_revision_id,NULL,NULL,phase,source_json,selected_bullets_json,edits_json,text_artifact_hash,pdf_artifact_hash,created_at FROM resume_versions WHERE id='resume-1'").run(snapshot.snapshotId);
+  capped.applications.selectResume(next.applicationId, "resume-2");
+  const second = await capped.preparation.prepare({ applicationId: next.applicationId, adapterId: "fixture", formUrl: FORM, answers: ANSWERS, settingsRevision: capped.store.current().revision });
   capped.applications.approve(second.attemptId!, { expectedManifestHash: String((second.manifest as Record<string, unknown>)["manifestHash"]), reason: "ok", settingsRevision: capped.store.current().revision });
   assert.equal((await capped.submission.submit(second.attemptId!, { actor: "operator" })).blocked?.code, "cap_reached");
 });

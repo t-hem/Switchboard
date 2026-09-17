@@ -131,10 +131,17 @@ try{
  assert.equal(health.retention.policy,'retain-all');
 
  // Jobs restart during submission ambiguity: the interrupted send becomes unknown, not a retry.
- const second=await api(base,`/api/applications/${applicationId}/prepare`,{adapterId:'fixture-form',formUrl:`${origin}/apply`,
+ const reopen=await api(base,`/api/applications/${applicationId}/prepare`,{adapterId:'fixture-form',formUrl:`${origin}/apply`,answers:{name:'Ada Lovelace',email:'ada@example.test'}});
+ assert.equal(reopen.status,409,'completed applications cannot be reopened for another send');
+ const nextCapture=await api(base,'/api/import/url',{url:`${origin}/posting?role=second`,company:'Acme',title:'Second Support Engineer'});
+ assert.equal(nextCapture.status,200,JSON.stringify(nextCapture.body));
+ const nextRender=await api(base,'/api/resumes/render',{jobSnapshotId:nextCapture.body.snapshotId,profileRevisionId:profile.id,templateRevisionId:template.id});
+ const nextApplicationId=nextCapture.body.applicationId;
+ await api(base,`/api/applications/${nextApplicationId}/resume`,{resumeVersionId:nextRender.body.resumeVersionId});
+ const second=await api(base,`/api/applications/${nextApplicationId}/prepare`,{adapterId:'fixture-form',formUrl:`${origin}/apply`,
   answers:{name:'Ada Lovelace',email:'ada@example.test',cover:'second run'}});
  assert.equal(second.body.state,'draft',JSON.stringify(second.body));
- const secondPkg=(await api(base,`/api/applications/${applicationId}/package`)).body;
+ const secondPkg=(await api(base,`/api/applications/${nextApplicationId}/package`)).body;
  await api(base,`/api/attempts/${second.body.attemptId}/approve`,{expectedManifestHash:secondPkg.attempt.manifest.manifestHash,reason:'ok'});
  for(const child of children)await stop(child);
  children.length=0;
@@ -143,7 +150,7 @@ try{
  interrupted.close();
  start();
  await until(async()=>(await fetch(`${base}/health`)).ok,'jobs restart');
- const afterRestart=(await api(base,`/api/applications/${applicationId}/package`)).body;
+ const afterRestart=(await api(base,`/api/applications/${nextApplicationId}/package`)).body;
  assert.equal(afterRestart.attempt.state,'unknown','a crash after the intent is unknown, never a silent retry');
  assert.equal(afterRestart.application.state,'submission_unknown');
  assert.equal((await (await fetch(`${origin}/__counts`)).json()).submissions,1,'recovery never resent');
@@ -152,7 +159,7 @@ try{
 
  // Everything survived the restart, and the earlier history is intact.
  const finalRecord=(await api(base,`/api/applications/${applicationId}/record`)).body;
- assert.equal(finalRecord.attempts.length,2,'history persists across a restart');
+ assert.equal(finalRecord.attempts.length,1,'the original application history persists across a restart');
  assert.equal(finalRecord.decisions.length>=1,true);
  const health2=(await api(base,'/api/health')).body;
  assert.equal(health2.retention.counts.application_attempts,2);

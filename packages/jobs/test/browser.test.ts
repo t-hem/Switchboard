@@ -30,6 +30,8 @@ test("ownership is proven by the profile directory, never by the PID alone", () 
   assert.equal(ownsProcess(entry, fakeOps({ alive: true, commandLine: "/usr/bin/chrome" }).ops), false);
   assert.equal(ownsProcess(entry, fakeOps({ alive: true, commandLine: null }).ops), false, "an unreadable command line fails closed");
   assert.equal(ownsProcess(entry, fakeOps({ alive: false, commandLine: null }).ops), false);
+  assert.equal(ownsProcess(entry, fakeOps({ alive: true, commandLine: `/chrome --user-data-dir=${PROFILE}-other` }).ops), false);
+  assert.equal(ownsProcess(entry, fakeOps({ alive: true, commandLine: `/chrome\0--user-data-dir=${PROFILE}\0--headless\0` }).ops), true);
 });
 
 test("an unverifiable live PID is dropped, and nothing is signalled", async () => {

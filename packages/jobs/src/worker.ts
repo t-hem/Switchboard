@@ -17,6 +17,7 @@ export class JobsWorker {
   private lease: SchedulerLease | null = null;
   private timer: NodeJS.Timeout | undefined;
   private ticking = false;
+  private tickSettled: Promise<void> = Promise.resolve();
   private active: Promise<unknown> | null = null;
   private discovery: Promise<unknown> | null = null;
   private lastDiscovery = 0;
@@ -50,12 +51,15 @@ export class JobsWorker {
   async tick(): Promise<void> {
     if (this.ticking || this.stopping.signal.aborted) return;
     this.ticking = true;
+    let settleTick!: () => void;
+    this.tickSettled = new Promise(resolve => { settleTick = resolve; });
     try {
       // A restored archive is inspectable only: no lease is taken and nothing is recovered,
       // reconciled, retried or dispatched.
       if (isReadOnly(this.services.dir)) return;
       if (!this.#holdLease()) return;
       await this.#reconcile();
+      if (this.stopping.signal.aborted || !this.#holdLease()) return;
       if (!this.active) {
         const claimed = this.services.queue.claim(this.lease!, this.taskLeaseMs, this.now());
         if (claimed) this.active = this.#run(claimed).finally(() => { this.active = null; });
@@ -66,7 +70,7 @@ export class JobsWorker {
           .catch(error => console.error("[discovery]", error))
           .finally(() => { this.discovery = null; });
       }
-    } finally { this.ticking = false; }
+    } finally { this.ticking = false; settleTick(); }
   }
 
   /** Test seam: resolves once the task and discovery cycle in flight have settled. */
@@ -79,6 +83,7 @@ export class JobsWorker {
   async stop(): Promise<void> {
     this.stopping.abort();
     if (this.timer) { clearInterval(this.timer); this.timer = undefined; }
+    await this.tickSettled;
     await this.idle();
     if (this.lease) {
       try { this.services.queue.releaseScheduler(this.lease, this.now()); } catch { /* already expired or taken */ }
@@ -109,7 +114,10 @@ export class JobsWorker {
       AND json_extract(error_json,'$.code')='reconciliation_required' ORDER BY updated_at LIMIT 10`).all(...TAILORING_KINDS) as Record<string, unknown>[];
     for (const row of rows) {
       if (this.stopping.signal.aborted) return;
-      try { await runner.reconcile(String(row["id"])); }
+      try { await runner.reconcile(String(row["id"]), () => {
+        this.stopping.signal.throwIfAborted();
+        this.lease = this.services.queue.renewScheduler(this.lease!, this.leaseMs, this.now());
+      }); }
       catch (error) { console.error("[worker] reconcile", error); }
     }
   }

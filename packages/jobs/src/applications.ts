@@ -13,6 +13,17 @@ import { type ArtifactStore } from "./artifacts.js";
 const REVIEWED_FIELDS = ["snapshotContentHash", "resumeTextHash", "settingsRevision", "adapterId", "adapterVersion", "formUrl", "answers", "filled", "uploads"] as const;
 export type HandoffContext = { applicationId: string; adapterId?: string; formUrl: string; answers: Record<string, string>; snapshotId?: string; resumeVersionId?: string; code?: string };
 
+/** Editing a completed application or an unresolved send can authorize a duplicate. */
+export function assertApplicationEditable(db: DatabaseSync, id: string): Record<string, unknown> {
+  const application = db.prepare("SELECT * FROM applications WHERE id=?").get(id);
+  if (!application) throw new AppError("application_missing", "Application not found", 404);
+  if (["submitted", "rejected", "submission_unknown"].includes(String(application["state"])) ||
+      db.prepare("SELECT 1 FROM application_attempts WHERE application_id=? AND state IN('submitting','unknown','submitted') LIMIT 1").get(id)) {
+    throw new AppError("application_locked", "This application has a completed or unresolved send; reconcile its outcome before changing it", 409);
+  }
+  return application;
+}
+
 /**
  * Approval, review packages and operator reconciliation. An approval is bound to one
  * attempt's manifest hash, and preparing anything with different evidence or answers
@@ -38,6 +49,10 @@ export class Applications {
       throw new AppError("attempt_not_reviewable", `Attempt is ${String(attempt["state"])}; only a draft can be approved`, 409);
     const time = new Date(this.now()).toISOString();
     return transaction(db, () => {
+      const application = assertApplicationEditable(db, String(attempt["application_id"]));
+      const latest = db.prepare("SELECT id FROM application_attempts WHERE application_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(String(attempt["application_id"]));
+      if (latest?.["id"] !== attemptId || application["selected_resume_id"] !== attempt["resume_id"])
+        throw new AppError("attempt_superseded", "Review a new preparation using the currently selected resume", 409);
       db.prepare("UPDATE application_attempts SET state='approved' WHERE id=? AND state='draft'").run(attemptId);
       db.prepare("UPDATE applications SET state='approved', block_reason=NULL, updated_at=? WHERE id=?").run(time, String(attempt["application_id"]));
       db.prepare(`INSERT INTO review_decisions(id,subject_type,subject_id,subject_version,decision,reason,before_json,after_json,settings_revision,created_at)
@@ -64,6 +79,14 @@ export class Applications {
       throw new AppError("resume_mismatch", "That resume was built for a different posting", 409);
     const time = new Date(this.now()).toISOString();
     transaction(db, () => {
+      const current = assertApplicationEditable(db, applicationId);
+      if (current["selected_resume_id"] !== resumeVersionId) {
+        const cancelled = db.prepare("UPDATE application_attempts SET state='cancelled' WHERE application_id=? AND state IN('draft','approved')").run(applicationId);
+        if (Number(cancelled.changes)) {
+          db.prepare("UPDATE applications SET state='review_required' WHERE id=?").run(applicationId);
+          event(db, "application.approval_invalidated", "application", applicationId, { reason: "resume_changed", resumeVersionId }, this.now());
+        }
+      }
       db.prepare("UPDATE applications SET selected_resume_id=?, updated_at=? WHERE id=?").run(resumeVersionId, time, applicationId);
       event(db, "application.resume_selected", "application", applicationId, { resumeVersionId }, this.now());
     });
@@ -82,11 +105,14 @@ export class Applications {
     const idempotencyKey = digest({ manual: applicationId, detail: input.detail });
     const existing = db.prepare("SELECT id FROM application_attempts WHERE idempotency_key=?").get(idempotencyKey) as Record<string, unknown> | undefined;
     if (existing) return { attemptId: String(existing["id"]), created: false };
+    assertApplicationEditable(db, applicationId);
     const receipt = input.receiptText ? this.deps.artifacts.put(Buffer.from(input.receiptText, "utf8"), "text/plain", "application-receipt") : null;
     const policyId = this.#manualPolicy();
     const time = new Date(this.now()).toISOString(), attemptId = randomUUID();
     const manifest = { method: "manual", applicationId, detail: input.detail, receiptHash: receipt?.hash ?? null, reportedAt: time, status: "submitted" };
     return transaction(db, () => {
+      assertApplicationEditable(db, applicationId);
+      db.prepare("UPDATE application_attempts SET state='cancelled' WHERE application_id=? AND state IN('draft','approved')").run(applicationId);
       db.prepare(`INSERT INTO application_attempts(id,application_id,idempotency_key,adapter_id,state,snapshot_id,resume_id,settings_revision,policy_id,manifest_json,preflight_at,send_started_at,finished_at,outcome_json,receipt_hash,created_at)
         VALUES(?,?,?,'manual','submitted',?,?,?,?,?,?,?,?,?,?,?)`).run(attemptId, applicationId, idempotencyKey, String(snapshot["id"]), resumeId, input.settingsRevision, policyId,
         JSON.stringify(manifest), time, time, time, JSON.stringify({ outcome: "submitted", method: "manual", detail: input.detail }), receipt?.hash ?? null, time);

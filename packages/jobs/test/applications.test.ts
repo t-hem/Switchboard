@@ -40,6 +40,32 @@ const run = (id: string, answers: Record<string, string> = {}) => ({ application
   formUrl: "https://forms.example/apply", answers: { name: "Ada", email: "ada@example.test", ...answers }, settingsRevision: 1 });
 const hashOf = (manifest: unknown) => String((manifest as Record<string, unknown>)["manifestHash"]);
 
+test("a resume change invalidates an existing approval and a superseded draft cannot be approved", async t => {
+  const f = fixture(t);
+  const first = await f.preparation.prepare(run(f.applicationId));
+  f.applications.approve(first.attemptId!, {expectedManifestHash:hashOf(first.manifest),reason:"ok",settingsRevision:1});
+  assert.equal((await f.preparation.prepare(run(f.applicationId))).state,"approved");
+  f.store.db.exec(`INSERT INTO resume_versions SELECT 'resume-2',job_snapshot_id,profile_revision_id,template_revision_id,parent_resume_id,agent_run_id,phase,source_json,selected_bullets_json,edits_json,text_artifact_hash,pdf_artifact_hash,created_at FROM resume_versions WHERE id='resume-1'`);
+  f.applications.selectResume(f.applicationId,"resume-2");
+  assert.equal(f.store.db.prepare("SELECT state FROM application_attempts WHERE id=?").get(first.attemptId!)!.state,"cancelled");
+  const newer = await f.preparation.prepare(run(f.applicationId,{phone:"123"}));
+  await f.preparation.prepare(run(f.applicationId,{phone:"456"}));
+  assert.throws(() => f.applications.approve(newer.attemptId!,{expectedManifestHash:hashOf(newer.manifest),reason:"stale",settingsRevision:1}), /current/);
+});
+
+test("completed and unresolved submissions cannot be reopened by preparation, approval or resume selection", async t => {
+  const f = fixture(t);
+  const draft = await f.preparation.prepare(run(f.applicationId));
+  f.store.db.prepare("UPDATE application_attempts SET state='submitting',send_started_at=? WHERE id=?").run(new Date(NOW).toISOString(),draft.attemptId!);
+  await assert.rejects(f.preparation.prepare(run(f.applicationId,{phone:"new"})), /unresolved send/);
+  assert.throws(() => f.applications.selectResume(f.applicationId,"resume-1"), /unresolved send/);
+  f.store.db.prepare("UPDATE application_attempts SET state='draft' WHERE id=?").run(draft.attemptId!);
+  f.applications.manualCompletion(f.applicationId,{detail:"Already applied",settingsRevision:1});
+  await assert.rejects(f.preparation.prepare(run(f.applicationId)), /completed/);
+  assert.throws(() => f.applications.approve(draft.attemptId!,{expectedManifestHash:hashOf(draft.manifest),reason:"old",settingsRevision:1}), /draft|completed/);
+  assert.equal(f.store.db.prepare("SELECT state FROM applications WHERE id=?").get(f.applicationId)!.state,"submitted");
+});
+
 test("an approval is bound to one manifest hash and only a draft can be approved", async (t) => {
   const { applications, preparation, applicationId, store } = fixture(t);
   const prepared = await preparation.prepare(run(applicationId, { name: "Ada" }));

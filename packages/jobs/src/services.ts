@@ -71,7 +71,7 @@ export function createServices(config: ServiceConfig, store: SettingsStore, dir:
     reviews, renderer,
     applications: new Applications({ db, artifacts, now }),
     preparation: new PreparationService({ store, db, artifacts, http, now, createSession }),
-    submission: new SubmissionService({ store, db, artifacts, http, now, createSession }),
+    submission: new SubmissionService({ store, db, artifacts, http, now, createSession, allowPrivate: config.allowPrivateImport === true }),
     records: new Records({ db, artifacts, now }),
     screening: new Screening(db, now),
     scheduler: new DiscoveryScheduler({ store, sources, discovery, queue, owner: `jobs-${process.pid}`, now }),

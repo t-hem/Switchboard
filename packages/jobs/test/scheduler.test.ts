@@ -91,6 +91,20 @@ test("a second scheduler cannot run alongside the owner", async (t) => {
   assert.equal((await scheduler.runOnce()).state, "ran");
 });
 
+test("manual run-now cannot overlap a cycle using the worker's shared lease", async t => {
+  const f = fixture(t, { acme: { companyName: "Acme", boardId: "acme", fixture: { postings: [job("a")] } } });
+  f.setSettings({ enabled: true, paused: false });
+  const lease = f.queue.acquireScheduler("shared-worker", 60_000, clock)!;
+  f.scheduler.useLease(() => lease);
+  const first = f.scheduler.runOnce();
+  assert.equal((await f.scheduler.runOnce({ force: true })).state, "locked");
+  assert.equal((await first).state, "ran");
+  f.queue.releaseScheduler(lease, clock);
+  const successor = f.queue.acquireScheduler("shared-worker", 60_000, clock)!;
+  assert.ok(successor.generation > lease.generation);
+  assert.throws(() => f.queue.renewScheduler(lease, 60_000, clock), /expired or changed/);
+});
+
 test("a broken source does not stall the others, and one cycle is bounded", async (t) => {
   const configs: Record<string, SourceConfig> = {};
   for (let n = 1; n <= 6; n++) configs[`s${n}`] = { companyName: `Co ${n}`, boardId: `s${n}`, fixture: { postings: [job(`s${n}-a`)] } };

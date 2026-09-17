@@ -8,7 +8,8 @@ import { ArtifactStore } from "../src/artifacts.js";
 import { Library } from "../src/library.js";
 import { Postings } from "../src/postings.js";
 import { PreparationService } from "../src/preparation.js";
-import { createApplicationAdapter, applicationAdapterIds, type FormField } from "../src/adapters/application.js";
+import { resumeUpload } from "../src/evidence.js";
+import { createApplicationAdapter, applicationAdapterIds, FixtureApplicationAdapter, registerApplicationAdapter, type FormField } from "../src/adapters/application.js";
 import type { HttpClient } from "../src/net.js";
 
 const offline: HttpClient = { async get() { throw new Error("fixture adapter must not use the network"); } };
@@ -46,6 +47,17 @@ function fixture(t: TestContext, options: { maxCaptureAgeMs?: number; withSnapsh
 const run = (id: string, options: Record<string, unknown> = {}, answers: Record<string, string> = {}) =>
   ({ applicationId: id, adapterId: "fixture", adapterOptions: { fields: uniFields, ...options }, formUrl: "https://forms.example/apply", answers, settingsRevision: 1, allowPrivate: false });
 
+test("staging a new resume cannot replace bytes held by an in-flight browser", t => {
+  const f = fixture(t);
+  const first = f.artifacts.put(Buffer.from("first resume"), "text/plain", "resume");
+  const second = f.artifacts.put(Buffer.from("second resume"), "text/plain", "resume");
+  const a = resumeUpload(f.artifacts, f.applicationId, first.hash);
+  const b = resumeUpload(f.artifacts, f.applicationId, second.hash);
+  assert.notEqual(a.localPath, b.localPath);
+  assert.equal(fs.readFileSync(a.localPath, "utf8"), "first resume");
+  assert.equal(fs.readFileSync(b.localPath, "utf8"), "second resume");
+});
+
 test("application adapters are a registry with an honest manual default", () => {
   assert.deepEqual(applicationAdapterIds(), ["fixture", "fixture-form", "manual"]);
   assert.equal(createApplicationAdapter("fixture").capabilities.submit, false, "step 9 never claims submission");
@@ -70,6 +82,36 @@ test("a clean preparation records a draft manifest and reuses it on repeat", asy
   assert.equal(again.created, false);
   assert.equal(again.attemptId, first.attemptId, "the same inputs never create a duplicate attempt");
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM application_attempts").get()!.n, 1);
+});
+
+test("concurrent identical preparations reuse one attempt, while changed inputs fence an in-flight preparation", async t => {
+  const f = fixture(t);
+  let release!: () => void;
+  let started!: () => void;
+  let entered = new Promise<void>(resolve => {started=resolve;});
+  let wait = new Promise<void>(resolve => {release=resolve;});
+  const id = 'delayed-preparation';
+  registerApplicationAdapter(id, () => {
+    const adapter = new FixtureApplicationAdapter();
+    const inspect = adapter.inspect.bind(adapter);
+    adapter.inspect = async url => {started();await wait;return inspect(url);};
+    return adapter;
+  });
+  const input = {...run(f.applicationId),adapterId:id,answers:{name:"Ada",email:"ada@example.test"}};
+  const one = f.preparation.prepare(input), two = f.preparation.prepare(input);
+  await entered; release();
+  const results = await Promise.all([one,two]);
+  assert.equal(results[0].attemptId,results[1].attemptId);
+  assert.equal(results.filter(result => result.created).length,1);
+  entered = new Promise<void>(resolve => {started=resolve;});
+  wait = new Promise<void>(resolve => {release=resolve;});
+  const stale = f.preparation.prepare({...input,answers:{...input.answers,name:"Changed"}});
+  await entered;
+  const settings = f.store.current();
+  f.store.update(settings.revision,{...settings.value,paused:false});
+  release();
+  await assert.rejects(stale,/changed while preparing/);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM application_attempts").get()!.n,1);
 });
 
 test("missing evidence, a stale capture and a missing resume block before any fill", async (t) => {

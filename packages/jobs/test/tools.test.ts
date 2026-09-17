@@ -76,6 +76,8 @@ test("scoped tools only allow choosing among validated revisions and bounded lay
 
   const finalized = runTool(draft, "finalize_resume") as { structured: { sections: { id: string }[] }; selectedBullets: { bulletId: string }[]; text: string };
   assert.deepEqual(finalized.structured.sections.map(section => section.id), ["experience", "skills", "summary"]);
+  assert.ok(finalized.text.indexOf("EXPERIENCE") < finalized.text.indexOf("SUMMARY"));
+  assert.equal(preview.text, finalized.text);
   assert.deepEqual(finalized.selectedBullets.map(entry => entry.bulletId), ["b-go", "b-db"]);
   assert.doesNotMatch(finalized.text, /Rust/);
 });

@@ -3,6 +3,7 @@ import puppeteer, { type Browser } from "puppeteer-core";
 import type { SupervisedBrowser } from "./browser.js";
 import { SourceError } from "./errors.js";
 import { assertImportableUrl, withRetries } from "./net.js";
+import { guardBrowserRequests } from "./browser-network.js";
 
 export const CAPTURE_VERSION = "1";
 
@@ -54,6 +55,7 @@ export class BrowserPageCapture implements PageCapture {
     const browser = await this.ensure();
     const page = await browser.newPage();
     try {
+      await guardBrowserRequests(page, options.allowPrivate);
       await page.setViewport({ width: 1280, height: 900 });
       try {
         await page.goto(url, { waitUntil: "load", timeout: options.timeoutMs });

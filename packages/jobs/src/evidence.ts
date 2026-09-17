@@ -18,7 +18,8 @@ export const resumeFilename = (applicationId: string): string => `resume-${appli
  * bytes must match. `bytes` may be passed when the caller has already verified them.
  */
 export function resumeUpload(artifacts: ArtifactStore, applicationId: string, hash: string, bytes: Buffer = artifacts.read(hash)): FileUpload {
-  const directory = path.join(artifacts.root, "uploads");
+  // Concurrent preparations must not overwrite the bytes another browser will upload.
+  const directory = path.join(artifacts.root, "uploads", digest(bytes));
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, resumeFilename(applicationId));
   fs.writeFileSync(file, bytes, { mode: 0o600 });

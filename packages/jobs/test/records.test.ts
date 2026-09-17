@@ -116,6 +116,25 @@ test("an export refuses to produce an incomplete bundle", (t) => {
   assert.equal(fs.existsSync(path.join(f.dir, "exports", "broken")), false, "no partial directory is left at the destination");
 });
 
+test("records retain failed runs, resume decisions, policies and nested artifact evidence", t => {
+  const f = fixture(t);
+  const task = new TaskQueue(f.db).enqueue({ kind: "resume:assemble", input: { applicationId: f.applicationId }, settingsRevision: 1 }, NOW);
+  f.db.prepare(`INSERT INTO agent_runs SELECT 'failed-run',?,attempt,'lost',spawner_provider,spawner_instance,NULL,process_identity,parent_run_id,run_directory,deadline_at,created_at,finished_at,persona_text,skills_json,prompt_text,agent,model,tools_json,permissions_json,revision_hashes_json,settings_revision,outcome_json FROM agent_runs WHERE id=?`).run(task.id, f.runId);
+  f.db.prepare("INSERT INTO review_decisions SELECT 'resume-decision','resume-edit','resume-edit',subject_version,'deny',reason,before_json,after_json,settings_revision,created_at FROM review_decisions LIMIT 1").run();
+  const artifact = f.artifacts.put(Buffer.from("tool-only evidence"), "text/plain", "tool-output");
+  f.db.prepare("UPDATE agent_runs SET outcome_json=? WHERE id='failed-run'").run(JSON.stringify({ diagnosticHash: artifact.hash }));
+  const record = f.records.recordOf(f.applicationId);
+  assert.ok((record.agentRuns as Record<string, unknown>[]).some(run => run.id === "failed-run"));
+  assert.ok((record.decisions as Record<string, unknown>[]).some(row => row.id === "resume-decision"));
+  assert.equal((record.attemptPolicies as unknown[]).length, 1);
+  assert.equal((record.profileRevisions as Record<string, unknown>[])[0]!.id, f.profile.id);
+  const exported = f.records.exportApplication(f.applicationId, path.join(f.dir, "full-export"));
+  assert.ok(exported.manifest.artifacts.some(item => item.hash === artifact.hash));
+  const manifestPath = path.join(exported.directory, "manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({ ...exported.manifest, artifacts: [{ hash: "../../outside", sizeBytes: 1 }] }));
+  assert.throws(() => Records.reconstruct(exported.directory), /Malformed artifact/);
+});
+
 test("health names missing artifacts, low disk, leftovers and a missing backup", (t) => {
   const f = fixture(t);
   const clean = healthOf(f.db, f.dir, { artifacts: f.artifacts, now: () => NOW });

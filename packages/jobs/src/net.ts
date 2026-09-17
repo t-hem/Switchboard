@@ -24,9 +24,18 @@ export function isPrivateAddress(address: string): boolean {
     const value = address.toLowerCase();
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
     if (mapped) return isPrivateAddress(mapped[1]!);
+    // URL parsing canonicalizes dotted IPv4-mapped IPv6 to hexadecimal groups.
+    const halves = value.split("::");
+    const left = halves[0] ? halves[0].split(":") : [];
+    const right = halves[1] ? halves[1].split(":") : [];
+    const groups = (halves.length === 2 ? [...left, ...Array(8-left.length-right.length).fill("0"), ...right] : left).map(part => parseInt(part,16));
+    if (groups.slice(0,5).every(part => part === 0) && groups[5] === 0xffff) {
+      return isPrivateAddress([groups[6]! >> 8, groups[6]! & 255, groups[7]! >> 8, groups[7]! & 255].join("."));
+    }
     if (value === "::" || value === "::1") return true;
     if (/^f[cd][0-9a-f]{2}:/.test(value)) return true;   // unique local fc00::/7
     if (/^fe[89ab][0-9a-f]:/.test(value)) return true;   // link local fe80::/10
+    if (/^ff/.test(value) || groups.slice(0,6).every(part => part === 0)) return true;
     return false;
   }
   return true; // not an address at all: fail closed
@@ -78,31 +87,49 @@ export class FetchHttpClient implements HttpClient {
       const url = await assertImportableUrl(current, { allowPrivate: this.options.allowPrivate });
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let response: Response;
       try {
-        response = await fetch(url, {
+        const response = await fetch(url, {
           redirect: "manual", signal: controller.signal,
           headers: { accept: options.accept ?? "application/json, text/html;q=0.9, */*;q=0.5", "user-agent": this.options.userAgent ?? "switchboard-jobs/0.1 (local personal use)" },
         });
-      } catch (error) {
-        throw new SourceError("source_unreachable", error instanceof Error && error.name === "AbortError" ? "Posting request timed out" : "Posting request failed", true);
-      } finally { clearTimeout(timer); }
       const location = response.headers.get("location");
       if (response.status >= 300 && response.status < 400 && location) {
+        await response.body?.cancel();
         if (hop === MAX_REDIRECTS) throw new SourceError("too_many_redirects", "Posting redirected too many times", false);
         current = new URL(location, url).toString();
         continue;
       }
       const contentType = response.headers.get("content-type") ?? "";
       const declared = Number(response.headers.get("content-length") ?? "0");
-      if (declared > maxBytes) throw new SourceError("response_too_large", "Posting response exceeds the configured size limit", false);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength > maxBytes) throw new SourceError("response_too_large", "Posting response exceeds the configured size limit", false);
+      if (declared > maxBytes) {
+        await response.body?.cancel();
+        throw new SourceError("response_too_large", "Posting response exceeds the configured size limit", false);
+      }
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      const reader = response.body?.getReader();
+      if (reader) try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          if (size > maxBytes) {
+            await reader.cancel();
+            throw new SourceError("response_too_large", "Posting response exceeds the configured size limit", false);
+          }
+          chunks.push(chunk.value);
+        }
+      } finally { reader.releaseLock(); }
+      const buffer = Buffer.concat(chunks, size);
       return {
         url: url.toString(), status: response.status, contentType,
         body: buffer.toString("utf8"), fetchedAt: new Date().toISOString(),
         headers: Object.fromEntries(response.headers.entries()),
       };
+      } catch (error) {
+        if (error instanceof SourceError) throw error;
+        throw new SourceError("source_unreachable", controller.signal.aborted ? "Posting request timed out" : "Posting request failed", true);
+      } finally { clearTimeout(timer); }
     }
     throw new SourceError("too_many_redirects", "Posting redirected too many times", false);
   }

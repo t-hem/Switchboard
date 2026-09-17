@@ -11,13 +11,14 @@ import type { HttpClient } from "./net.js";
 import { createApplicationAdapter, type ApplicationAdapter, type FormSession } from "./adapters/application.js";
 import { MAX_CAPTURE_AGE_MS, jsonDigest as digest, resumeUpload } from "./evidence.js";
 import { policyScope } from "./policies.js";
+import { assertApplicationEditable } from "./applications.js";
 
 export { MAX_CAPTURE_AGE_MS } from "./evidence.js";
 
 export type PreparationOutcome = {
   attemptId: string | null;
   created: boolean;
-  state: "draft" | "needs_input" | "blocked";
+  state: "draft" | "approved" | "needs_input" | "blocked";
   code?: string;
   detail?: string;
   manifest?: Record<string, unknown>;
@@ -43,6 +44,9 @@ export class PreparationService {
     const { db } = this.deps;
     const application = db.prepare("SELECT id,job_id,selected_resume_id,state FROM applications WHERE id=?").get(input.applicationId) as Record<string, unknown> | undefined;
     if (!application) throw new AppError("application_missing", "Application not found", 404);
+    assertApplicationEditable(db, input.applicationId);
+    const latestAttempt = () => db.prepare("SELECT id FROM application_attempts WHERE application_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1").get(input.applicationId)?.["id"] ?? null;
+    const startingAttempt = latestAttempt();
 
     const blocked = (code: string, detail: string): PreparationOutcome => this.#block(input, code, detail);
 
@@ -66,8 +70,15 @@ export class PreparationService {
     // Identical inputs reuse the same draft and never touch the browser twice. Answers are
     // part of the key, so changing them invalidates a prior review rather than silently reusing it.
     const idempotencyKey = this.#idempotencyKey(input, snapshot, resume);
-    const existing = db.prepare("SELECT id,manifest_json FROM application_attempts WHERE idempotency_key=?").get(idempotencyKey) as Record<string, unknown> | undefined;
-    if (existing) return { attemptId: String(existing["id"]), created: false, state: "draft", manifest: JSON.parse(String(existing["manifest_json"])) as Record<string, unknown> };
+    const existingOutcome = (): PreparationOutcome | null => {
+      const existing = db.prepare("SELECT id,state,manifest_json FROM application_attempts WHERE idempotency_key=?").get(idempotencyKey);
+      if (!existing) return null;
+      if (!["draft", "approved"].includes(String(existing["state"])) || latestAttempt() !== existing["id"])
+        throw new AppError("attempt_superseded", "These inputs belong to a superseded attempt; review the current preparation", 409);
+      return { attemptId: String(existing["id"]), created: false, state: existing["state"] as "draft" | "approved", manifest: JSON.parse(String(existing["manifest_json"])) };
+    };
+    const existing = existingOutcome();
+    if (existing) return existing;
 
     const session = this.deps.createSession?.() ?? undefined;
     const context = { http: this.deps.http, allowPrivate: input.allowPrivate === true, session };
@@ -94,6 +105,14 @@ export class PreparationService {
       const manifestHash = digest(manifest);
 
       return transaction(this.deps.db, () => {
+        const current = assertApplicationEditable(db, input.applicationId);
+        const latestSnapshot = db.prepare("SELECT id FROM job_snapshots WHERE job_id=? AND completeness='complete' ORDER BY captured_at DESC,rowid DESC LIMIT 1").get(String(application["job_id"]));
+        if (current["selected_resume_id"] !== resumeId || this.deps.store.current().revision !== input.settingsRevision || latestSnapshot?.["id"] !== snapshot["id"])
+          throw new AppError("preparation_changed", "Resume, posting evidence or settings changed while preparing; prepare again", 409);
+        const concurrent = existingOutcome();
+        if (concurrent) return concurrent;
+        if (latestAttempt() !== startingAttempt)
+          throw new AppError("preparation_changed", "Another preparation finished first; review that attempt before preparing again", 409);
         const policyId = this.#policy(adapter.id, inspection.formUrl);
         const attemptId = randomUUID();
         const time = new Date(this.now()).toISOString();
@@ -118,7 +137,7 @@ export class PreparationService {
     snapshot: Record<string, unknown>, resume: Record<string, unknown>): string {
     const answersHash = digest(Object.keys(input.answers).sort().map(key => [key, input.answers[key]]));
     // Adapter options change what the adapter does, so they are part of the inputs too.
-    return digest({ applicationId: input.applicationId, snapshot: snapshot["content_hash"], resume: resume["text_artifact_hash"],
+    return digest({ applicationId: input.applicationId, snapshotId: snapshot["id"], resumeId: resume["id"], snapshot: snapshot["content_hash"], resume: resume["text_artifact_hash"],
       settingsRevision: input.settingsRevision, adapterId: input.adapterId, formUrl: input.formUrl, answersHash,
       adapterOptionsHash: digest(input.adapterOptions ?? null) });
   }

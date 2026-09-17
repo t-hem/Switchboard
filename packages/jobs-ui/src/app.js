@@ -188,7 +188,7 @@ async function loadApplications(){
   :'No browser executable configured: only in-process adapters can prepare.';
 }
 function artifactButton(label,hash){return button(label,()=>download(hash));}
-function sourceLink(text,href){const a=document.createElement('a');a.textContent=text;a.href=href;a.rel='noreferrer noopener';a.target='_blank';return a;}
+function sourceLink(text,href){const a=document.createElement('a');a.textContent=text;try{const url=new URL(href);if(['http:','https:'].includes(url.protocol))a.href=url.href;}catch{}a.rel='noreferrer noopener';a.target='_blank';return a;}
 function jsonBlock(label,value){const box=document.createElement('details');const summary=document.createElement('summary');summary.textContent=label;box.append(summary);
  const pre=document.createElement('pre');pre.textContent=JSON.stringify(value,null,2);box.append(pre);return box;}
 async function showPackage(applicationId){
@@ -214,11 +214,12 @@ async function showPackage(applicationId){
   resume.append(artifactButton('Download resume text',pkg.resume.text_artifact_hash));
   resume.append(document.createTextNode(pkg.resume.pdf_artifact_hash?' PDF available.':' PDF output is not implemented; preparation uploads the text artifact.'));
   if(pkg.agentRun)resume.append(button(`View agent run (${pkg.agentRun.state})`,()=>showRecord(`/api/agents/${encodeURIComponent(pkg.agentRun.id)}`,'Agent run')));
- } else {
-  resume.append(document.createTextNode('No resume is selected. Pick one built for this posting:\n'));
+ }
+ if(!['submitted','rejected','submission_unknown'].includes(application.state)) {
+  resume.append(document.createTextNode(pkg.resume?'Choose a different resume (requires preparing and approving again):\n':'No resume is selected. Pick one built for this posting:\n'));
   const select=document.createElement('select');
   for(const candidate of pkg.availableResumes??[]){const option=document.createElement('option');
-   option.value=candidate.id;option.textContent=`${candidate.phase} · ${String(candidate.id).slice(0,8)} · ${candidate.created_at}`;select.append(option);}
+   option.value=candidate.id;option.selected=candidate.id===pkg.resume?.id;option.textContent=`${candidate.phase} · ${String(candidate.id).slice(0,8)} · ${candidate.created_at}`;select.append(option);}
   resume.append(select);
   resume.append(button('Use this resume for this application',async()=>{
    if(!select.value){message('There is no rendered resume for this posting yet; render one first.');return;}
@@ -337,7 +338,7 @@ $('prepare-form').onsubmit=async event=>{event.preventDefault();
  const submit=$('prepare-submit');submit.disabled=true;
  try{
   const outcome=await request(`/api/applications/${encodeURIComponent(applicationId)}/prepare`,{adapterId:$('prepare-adapter').value,formUrl:$('prepare-url').value,answers:JSON.parse($('prepare-answers').value||'{}')},'POST');
-  message(outcome.state==='draft'?`Prepared and ready for review (attempt ${String(outcome.attemptId).slice(0,8)}).`:`${outcome.state}: ${outcome.code} — ${outcome.detail}`);
+  message(outcome.state==='draft'?`Prepared and ready for review (attempt ${String(outcome.attemptId).slice(0,8)}).`:outcome.state==='approved'?'These inputs already have an approved preparation. Nothing was sent.':`${outcome.state}: ${outcome.code} — ${outcome.detail}`);
   await showPackage(applicationId);await loadDashboard();
  }catch(error){message(error.message);}finally{submit.disabled=false;}};
 if($('token').value)void load();

@@ -1,12 +1,17 @@
 # Implementation handoff
 
-Updated 2026-09-17 (fourth session). This is the document to read first in a new session.
+Updated 2026-09-17 (jobs review). This is the document to read first in a new session.
 [JOB-APPLICATION-PLAN.md](./JOB-APPLICATION-PLAN.md) is the authoritative staged plan and log;
 [JOBS-OPERATIONS.md](./JOBS-OPERATIONS.md) is the runbook for running and recovering the add-on;
 [TESTING.md](./TESTING.md) lists what is verified and what still needs hardware.
 
 ## Current state
 
+- **Latest review:** [JOBS-REVIEW-2026-09-17.md](./JOBS-REVIEW-2026-09-17.md) records the
+  current uncommitted hardening changes, tests, and remaining release blockers. In particular,
+  the non-submission stage-review gates are not fully wired; the bridge is not the only
+  remaining requirement for a production workflow. Do not enable unattended use on the
+  strength of fixture tests alone.
 - **Everything through step 11 is merged to `master`** (`b68bdc7`) and pushed. The merge was a
   fast-forward; **all 11 stage branches were deleted locally and on the remote**, because they
   are ancestors of `master`. There is no branch dance any more — commit to `master` again, or
@@ -15,11 +20,11 @@ Updated 2026-09-17 (fourth session). This is the document to read first in a new
   procedures are written (`JOBS-OPERATIONS.md`), `acceptance/rollout.mjs` verifies a fresh data
   directory end to end, the agent API-key path is verified, and the resume-selection gap that
   rehearsal exposed is fixed.
-- **The one hard blocker for real, model-driven work is the tool bridge.** The runner invokes
+- **A hard blocker for real, model-driven work is the tool bridge.** The runner invokes
   the agent with `[--extension <bridge>] [--tools …] @<taskfile>` and that bridge does not
   exist, so a live model cannot call the scoped draft tools and the two-pass tailored resume
-  cannot run. The real `--mode json` envelope is also unverified. Everything else in the
-  pipeline runs. See [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md).
+  cannot run. The real `--mode json` envelope is also unverified. See the latest review above
+  for other workflow gaps and [packages/jobs/PERSONAS.md](./packages/jobs/PERSONAS.md).
 
 ## Review fixes (2026-09-17, fourth session)
 

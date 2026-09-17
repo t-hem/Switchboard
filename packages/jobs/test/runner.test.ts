@@ -319,6 +319,42 @@ test("recovery reattaches a child that finished while no worker was watching", a
   assert.equal(f.spawner.created.length, 1, "no second agent was started");
 });
 
+test("recovery rediscovers a finished child after a crash before the create response was recorded", async t => {
+  const stopping = new AbortController();
+  const f = fixture(t, (_request, _index, g) => {
+    stopping.abort();
+    g.spawner.unreachable = true;
+    return { state: "exited", result: assembled(g), responseLost: true };
+  });
+  const outcome = await f.start({ signal: stopping.signal });
+  assert.equal(outcome.state, "abandoned");
+  assert.equal(f.store.db.prepare("SELECT spawner_session_id FROM agent_runs WHERE id=?").get(outcome.runId)!.spawner_session_id, null);
+  const later = Date.now() + 400_000;
+  const successor = f.queue.acquireScheduler("next-worker", 300_000, later)!;
+  f.queue.recoverExpired(successor, later);
+  f.spawner.unreachable = false;
+  assert.equal(await f.runner.reconcile(outcome.taskId),"accepted");
+  assert.equal(f.store.db.prepare("SELECT spawner_session_id FROM agent_runs WHERE id=?").get(outcome.runId)!.spawner_session_id,"sess-1");
+  assert.equal(f.spawner.created.length,1);
+});
+
+test("changing the spawner does not classify the old host's child as dead", async t => {
+  const { f, outcome } = await abandonedRun(t, g => ({state:"running",result:assembled(g)}));
+  const other = new TailoringRunner({...f.runner.deps,spawnerInstance:"http://another-host:7777"});
+  assert.equal(await other.reconcile(outcome.taskId),"unreachable");
+  assert.equal(f.queue.get(outcome.taskId)!.state,"blocked");
+  assert.equal(f.spawner.created.length,1);
+});
+
+test("recovery rechecks ownership after waiting for the spawner", async t => {
+  const { f, outcome } = await abandonedRun(t, g => ({ state: "running", result: assembled(g) }));
+  f.spawner.finish(outcome.sessionId!);
+  let checks = 0;
+  await assert.rejects(() => f.runner.reconcile(outcome.taskId, () => { if (++checks === 2) throw new Error("lease lost"); }), /lease lost/);
+  assert.equal(f.queue.get(outcome.taskId)!.state, "blocked");
+  assert.equal(count(f, "SELECT count(*) AS n FROM resume_versions"), 0);
+});
+
 test("recovery retries a dead child from its saved inputs, and fails once attempts are spent", async (t) => {
   const { f, outcome, successor } = await abandonedRun(t, () => ({ state: "running", write: false }));
   f.spawner.forget(outcome.sessionId!);

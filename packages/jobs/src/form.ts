@@ -1,6 +1,7 @@
 import type { SupervisedBrowser } from "./browser.js";
 import { NothingSentError, SourceError } from "./errors.js";
 import { assertImportableUrl } from "./net.js";
+import { guardBrowserRequests } from "./browser-network.js";
 import type { FormField, FormInspection, FormSession, ObservedForm, SubmitConfirmation } from "./adapters/application.js";
 
 /** Narrow browser-side interop: these callbacks are serialized into the page, not run in Node. */
@@ -57,6 +58,7 @@ export class PuppeteerFormSession implements FormSession {
     const browser = await this.browser.ensure();
     const page = await browser.newPage();
     this.page = page;
+    await guardBrowserRequests(page, options.allowPrivate);
     await page.setViewport({ width: 1280, height: 900 });
     try { await page.goto(url, { waitUntil: "load", timeout: options.timeoutMs }); }
     catch (error) { throw new SourceError("form_unavailable", error instanceof Error && /timeout/i.test(error.message) ? "The application form timed out" : "The application form could not be loaded", true); }

@@ -21,7 +21,7 @@ export const defaultProcessOps: ProcessOps = {
     catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
   },
   commandLine(pid) {
-    try { return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" "); }
+    try { return fs.readFileSync(`/proc/${pid}/cmdline`, "utf8"); }
     catch { return null; }
   },
   signal(pid, signal) { process.kill(pid, signal); },
@@ -31,7 +31,9 @@ export const defaultProcessOps: ProcessOps = {
 export function ownsProcess(entry: BrowserOwnership, ops: ProcessOps): boolean {
   if (!ops.isAlive(entry.pid)) return false;
   const commandLine = ops.commandLine(entry.pid);
-  return commandLine !== null && commandLine.includes(`--user-data-dir=${entry.profileDir}`);
+  if (commandLine === null) return false;
+  const args = commandLine.includes("\0") ? commandLine.split("\0") : commandLine.split(/\s+/);
+  return args.includes(`--user-data-dir=${entry.profileDir}`);
 }
 
 export type ReapOutcome = "no_record" | "already_gone" | "unverified" | "killed" | "failed";
@@ -50,6 +52,7 @@ export async function reapOwned(entry: BrowserOwnership | null, ops: ProcessOps 
   ops.signal(entry.pid, "SIGTERM");
   for (let waited = 0; waited < graceMs && ops.isAlive(entry.pid); waited += pollMs) await wait(Math.min(pollMs, graceMs - waited));
   if (!ops.isAlive(entry.pid)) return "killed";
+  if (!ownsProcess(entry, ops)) return "unverified";
   ops.signal(entry.pid, "SIGKILL");
   await wait(pollMs);
   return ops.isAlive(entry.pid) ? "failed" : "killed";

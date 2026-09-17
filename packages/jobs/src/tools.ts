@@ -1,6 +1,6 @@
 import { AppError } from "./errors.js";
 import { Library, type BulletRevision, type ProfileRevision, type TemplateRevision, type TemplateSection } from "./library.js";
-import { buildStructured, rankBullets, type ResumeSection, type SelectedBullet, type StructuredResume } from "./resume.js";
+import { buildStructured, rankBullets, renderText, type ResumeSection, type SelectedBullet, type StructuredResume } from "./resume.js";
 
 type BulletSection = Extract<TemplateSection, { type: "bullets" }>;
 
@@ -76,14 +76,14 @@ export class DraftState {
       .map(entry => this.bullets.find(bullet => bullet.id === entry.revisionId)!);
   }
   build(): { structured: StructuredResume; selectedBullets: SelectedBullet[]; text: string; sections: ResumeSection[] } {
-    const { structured, selectedBullets, text } = buildStructured({
+    const { structured, selectedBullets } = buildStructured({
       jobSnapshotId: this.jobSnapshotId, profile: this.profile, template: this.template, bullets: this.bullets,
       title: this.jobTitle, descriptionText: this.descriptionText, pick: section => this.pick(section),
     });
     // Re-apply any explicit section ordering chosen through order_sections.
     const byId = new Map(structured.sections.map(section => [section.id, section]));
     structured.sections = this.sectionOrder.map(id => byId.get(id)!).filter(Boolean);
-    return { structured, selectedBullets, text, sections: structured.sections };
+    return { structured, selectedBullets, text: renderText(structured), sections: structured.sections };
   }
 }
 

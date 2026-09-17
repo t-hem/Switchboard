@@ -5,6 +5,7 @@ import { buildServer } from "./server.js";
 import { SupervisedBrowser, browserPaths } from "./browser.js";
 import { createServices } from "./services.js";
 import { JobsWorker } from "./worker.js";
+import { isReadOnly } from "./health.js";
 
 async function main(): Promise<void> {
   assertRuntime();
@@ -13,14 +14,15 @@ async function main(): Promise<void> {
   const store=new SettingsStore(path.join(dir,"jobs.sqlite"));
 
   // One owned browser per service, with its own profile; a crashed run is reaped on start.
-  const browser = config.browserExecutablePath
+  const readOnly = isReadOnly(dir);
+  const browser = !readOnly && config.browserExecutablePath
     ? new SupervisedBrowser({ executablePath: config.browserExecutablePath, ...browserPaths(dir) })
     : undefined;
   if (browser) { const reaped = await browser.reapStale(); if (reaped !== "no_record" && reaped !== "already_gone") console.log(`Supervised browser cleanup: ${reaped}`); }
   const services=createServices(config,store,dir,{browser});
   // Nothing has been sent by this process yet, so every in-flight attempt was interrupted:
   // it becomes unknown, never retried silently.
-  const swept=services.submission.sweepStale({interrupted:true});
+  const swept=readOnly ? { swept: 0 } : services.submission.sweepStale({interrupted:true});
   if(swept.swept)console.log(`Unconfirmed submissions now await reconciliation: ${swept.swept}`);
 
   // The background worker: discovery on its interval, queued tailoring stages, and

@@ -96,6 +96,13 @@ export class DiscoveryScheduler {
   }
 
   async runOnce(options: { force?: boolean; signal?: AbortSignal } = {}): Promise<CycleSummary> {
+    if (this.running) return { state: "locked", ranAt: new Date(this.now()).toISOString(), results: [] };
+    this.running = true;
+    try { return await this.cycle(options); }
+    finally { this.running = false; }
+  }
+
+  private async cycle(options: { force?: boolean; signal?: AbortSignal }): Promise<CycleSummary> {
     const now = this.now();
     const ranAt = new Date(now).toISOString();
     const settingsRevision = this.deps.store.current().revision;
@@ -109,6 +116,8 @@ export class DiscoveryScheduler {
     try {
       for (const source of this.due(options.force === true).slice(0, MAX_SOURCES_PER_RUN)) {
         if (options.signal?.aborted) break;
+        if (!this.status().dispatchAvailable) break;
+        this.deps.queue.assertScheduler(lease, this.now());
         if (!shared) this.deps.queue.renewScheduler(lease, LEASE_MS, this.now());
         try {
           const outcome = await this.deps.discovery.run(source.id, {
@@ -132,9 +141,7 @@ export class DiscoveryScheduler {
   /** Serialised tick: an overlapping timer never starts a second cycle. */
   async tick(): Promise<CycleSummary | null> {
     if (this.running) return null;
-    this.running = true;
-    try { return await this.runOnce(); }
-    finally { this.running = false; }
+    return this.runOnce();
   }
 
   start(intervalMs = 60_000): void {

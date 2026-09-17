@@ -11,7 +11,11 @@ const HASH = /^[a-f0-9]{64}$/;
 
 /** Every artifact referenced anywhere in a record, so an export is self-contained. */
 function referencedHashes(value: unknown, found = new Set<string>()): Set<string> {
-  if (typeof value === "string") { if (HASH.test(value)) found.add(value); return found; }
+  if (typeof value === "string") {
+    if (HASH.test(value)) found.add(value);
+    else if (/^\s*[\[{]/.test(value)) { try { referencedHashes(JSON.parse(value), found); } catch { /* ordinary prose */ } }
+    return found;
+  }
   if (Array.isArray(value)) { for (const item of value) referencedHashes(item, found); return found; }
   if (value && typeof value === "object") { for (const item of Object.values(value)) referencedHashes(item, found); return found; }
   return found;
@@ -37,14 +41,19 @@ export class Records {
     const resumes = tryRows(`SELECT r.* FROM resume_versions r JOIN job_snapshots s ON s.id=r.job_snapshot_id WHERE s.job_id=? ORDER BY r.created_at, r.rowid`, jobId);
     const attemptRows = tryRows("SELECT * FROM application_attempts WHERE application_id=? ORDER BY created_at, rowid", applicationId);
     const attemptIds = attemptRows.map(row => String(row["id"]));
-    const runIds = [...new Set(resumes.map(row => row["agent_run_id"]).filter((id): id is string => typeof id === "string"))];
-    const subjects = [applicationId, ...attemptIds];
+    const applicationTasks = tryRows("SELECT * FROM tasks WHERE json_extract(input_json,'$.applicationId')=? ORDER BY created_at,rowid", applicationId);
+    const taskRunIds = applicationTasks.flatMap(task => tryRows("SELECT id FROM agent_runs WHERE task_id=? ORDER BY attempt", task["id"]).map(run => String(run["id"])));
+    const runIds = [...new Set([...taskRunIds, ...resumes.map(row => row["agent_run_id"]).filter((id): id is string => typeof id === "string")])];
+    const subjects = [applicationId, ...attemptIds, ...resumes.map(row => String(row["id"]))];
     const decisions = tryRows(`SELECT * FROM review_decisions WHERE subject_id IN (${subjects.map(() => "?").join(",")}) ORDER BY created_at, rowid`, ...subjects);
     return {
       recordVersion: 1, generatedAt: new Date(this.now()).toISOString(),
       application, job: db.prepare("SELECT * FROM jobs WHERE id=?").get(jobId) ?? null,
       aliases: tryRows("SELECT a.*, s.adapter_id, s.source_key FROM job_aliases a LEFT JOIN sources s ON s.id=a.source_id WHERE a.job_id=?", jobId),
       policy: application["policy_id"] ? db.prepare("SELECT * FROM source_policies WHERE id=?").get(String(application["policy_id"])) ?? null : null,
+      attemptPolicies: [...new Set(attemptRows.map(row => row["policy_id"]).filter(Boolean))].map(id => db.prepare("SELECT * FROM source_policies WHERE id=?").get(String(id))),
+      profileRevisions: [...new Set(resumes.map(row => String(row["profile_revision_id"])))].map(id => db.prepare("SELECT * FROM profile_revisions WHERE id=?").get(id)),
+      templateRevisions: [...new Set(resumes.map(row => String(row["template_revision_id"])))].map(id => db.prepare("SELECT * FROM template_revisions WHERE id=?").get(id)),
       screening: tryRows("SELECT * FROM screening_decisions WHERE job_id=? ORDER BY created_at, rowid", jobId),
       // Evidence: the posting text and image hashes exactly as captured.
       snapshots: snapshots.map(snapshot => ({ ...snapshot })),
@@ -67,7 +76,7 @@ export class Records {
         receiptText: attempt["receipt_hash"] === null ? null : this.#text(String(attempt["receipt_hash"])) })),
       decisions,
       attention: tryRows(`SELECT * FROM attention_items WHERE subject_id IN (${subjects.map(() => "?").join(",")}) ORDER BY created_at, rowid`, ...subjects),
-      tasks: tryRows(`SELECT t.* FROM tasks t JOIN agent_runs r ON r.task_id=t.id WHERE r.id IN (${runIds.length ? runIds.map(() => "?").join(",") : "''"}) ORDER BY t.created_at`, ...runIds),
+      tasks: [...new Map([...applicationTasks, ...tryRows(`SELECT t.* FROM tasks t JOIN agent_runs r ON r.task_id=t.id WHERE r.id IN (${runIds.length ? runIds.map(() => "?").join(",") : "''"}) ORDER BY t.created_at`, ...runIds)].map(task => [task["id"], task])).values()],
       events: [...tryRows("SELECT * FROM events WHERE subject_type='application' AND subject_id=? ORDER BY id, rowid", applicationId),
         ...attemptIds.flatMap(id => tryRows("SELECT * FROM events WHERE subject_type='attempt' AND subject_id=? ORDER BY id, rowid", id))],
     };
@@ -87,18 +96,19 @@ export class Records {
       fs.mkdirSync(path.join(staging, "artifacts"), { mode: 0o700 });
       for (const artifact of artifacts) {
         const bytes = this.deps.artifacts.read(artifact.hash); // verifies size and digest
-        fs.writeFileSync(path.join(staging, "artifacts", artifact.hash), bytes, { mode: 0o600 });
+        fs.writeFileSync(path.join(staging, "artifacts", artifact.hash), bytes, { mode: 0o600, flush: true });
       }
       const recordJson = JSON.stringify(record, null, 2) + "\n";
-      fs.writeFileSync(path.join(staging, "record.json"), recordJson, { mode: 0o600 });
+      fs.writeFileSync(path.join(staging, "record.json"), recordJson, { mode: 0o600, flush: true });
       const manifest: ExportManifest = { formatVersion: 1, createdAt: new Date(this.now()).toISOString(), applicationId,
         recordHash: digest(Buffer.from(recordJson, "utf8")),
         artifacts: artifacts.map(artifact => ({ hash: artifact.hash, sizeBytes: artifact.sizeBytes, purpose: artifact.purpose })) };
-      fs.writeFileSync(path.join(staging, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600 });
+      fs.writeFileSync(path.join(staging, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600, flush: true });
       flushDirectory(path.join(staging, "artifacts")); flushDirectory(staging);
       fs.mkdirSync(target, { mode: 0o700 });
       fs.renameSync(staging, target);
       flushDirectory(target);
+      flushDirectory(path.dirname(target));
       return { directory: target, manifest };
     } catch (error) {
       throw new AppError("export_incomplete", `Export incomplete; inspect ${staging}: ${error instanceof Error ? error.message : "unknown error"}`, 500);
@@ -115,7 +125,7 @@ export class Records {
     if (digest(recordJson) !== manifest.recordHash) throw new Error("The exported record does not match its manifest hash");
     const record = JSON.parse(recordJson.toString("utf8")) as Record<string, unknown>;
     for (const artifact of manifest.artifacts) {
-      if (!artifact || typeof artifact.hash !== "string") throw new Error("Malformed artifact entry in the export manifest");
+      if (!artifact || typeof artifact.hash !== "string" || !HASH.test(artifact.hash) || !Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes < 0) throw new Error("Malformed artifact entry in the export manifest");
       const file = path.join(archive, "artifacts", artifact.hash);
       const bytes = fs.readFileSync(file);
       if (bytes.byteLength !== artifact.sizeBytes || digest(bytes) !== artifact.hash) throw new Error(`Artifact ${artifact.hash} is missing, truncated or altered`);

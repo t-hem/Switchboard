@@ -21,7 +21,7 @@ export type SubmitResult = { attemptId: string; state: string; outcome: string |
 
 
 /** Wraps a form session so the service knows whether the adapter pressed the submit control. */
-function trackSubmit(inner: FormSession): { session: FormSession; pressed: () => boolean } {
+function trackSubmit(inner: FormSession, beforePress: () => void): { session: FormSession; pressed: () => boolean } {
   let pressed = false;
   const session: FormSession = {
     open: (url, options) => inner.open(url, options),
@@ -29,7 +29,7 @@ function trackSubmit(inner: FormSession): { session: FormSession; pressed: () =>
     uploadFile: (field, filePath) => inner.uploadFile(field, filePath),
     observe: () => inner.observe(),
     clickPreview: () => inner.clickPreview(),
-    submitForm: () => { pressed = true; return inner.submitForm(); },
+    submitForm: () => { beforePress(); pressed = true; return inner.submitForm(); },
     screenshot: () => inner.screenshot(),
     close: () => inner.close(),
   };
@@ -49,7 +49,7 @@ export class SubmissionService {
   private readonly createAdapter: (id: string) => ApplicationAdapter;
   private readonly createSession?: () => FormSession;
   constructor(private readonly deps: { store: SettingsStore; db: DatabaseSync; artifacts: ArtifactStore; http: HttpClient;
-    now?: () => number; captureAgeMs?: number; createAdapter?: (id: string) => ApplicationAdapter; createSession?: () => FormSession; graceMs?: number }) {
+    now?: () => number; captureAgeMs?: number; createAdapter?: (id: string) => ApplicationAdapter; createSession?: () => FormSession; graceMs?: number; allowPrivate?: boolean }) {
     this.now = deps.now ?? Date.now;
     this.captureAge = deps.captureAgeMs ?? MAX_CAPTURE_AGE_MS;
     this.createAdapter = deps.createAdapter ?? (id => createApplicationAdapter(id));
@@ -89,11 +89,19 @@ export class SubmissionService {
 
     // 4. Send, then record exactly what came back.
     let result: SubmitOutcome;
-    const tracked = this.createSession ? trackSubmit(this.createSession()) : undefined;
+    let tracked: ReturnType<typeof trackSubmit> | undefined;
     try {
+      tracked = this.createSession ? trackSubmit(this.createSession(), () => {
+        // Preparing the browser can take time. Recheck pause/policy/evidence at the
+        // actual send boundary, while keeping this attempt's atomic claim.
+        if (db.prepare("SELECT state FROM application_attempts WHERE id=?").get(attemptId)?.["state"] !== "submitting")
+          throw new NothingSentError("send_claim_lost", "This send no longer owns its claim", false);
+        const gate = this.#gates(attempt, applicationId, formUrl, adapter, db, true) ?? this.#evidence(manifest, db);
+        if (gate) throw new NothingSentError(gate.code, gate.detail, false);
+      }) : undefined;
       const resume = resumeUpload(this.deps.artifacts, applicationId, String(manifest["resumeTextHash"]));
       result = await adapter.submit({ attemptId, formUrl, idempotencyKey: String(attempt["idempotency_key"]),
-        answers: (manifest["answers"] ?? {}) as Record<string, string>, resume }, { http: this.deps.http, allowPrivate: true, session: tracked?.session });
+        answers: (manifest["answers"] ?? {}) as Record<string, string>, resume }, { http: this.deps.http, allowPrivate: this.deps.allowPrivate === true, session: tracked?.session });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const code = error instanceof SourceError ? error.code : "submit_failed";
@@ -104,11 +112,13 @@ export class SubmissionService {
       }
       // Nothing was sent, so the attempt returns to where it was, not to unknown.
       transaction(db, () => {
-        db.prepare("UPDATE application_attempts SET state=?, send_started_at=NULL WHERE id=?").run(previousState, attemptId);
+        const restored = db.prepare("UPDATE application_attempts SET state=?, send_started_at=NULL WHERE id=? AND state='submitting'").run(previousState, attemptId);
+        if (!Number(restored.changes)) return;
         db.prepare("UPDATE applications SET state=?, block_reason=?, updated_at=? WHERE id=?").run(previousState === "approved" ? "approved" : "review_required", `${code}: ${detail}`.slice(0, 500), new Date(this.now()).toISOString(), applicationId);
       });
       event(db, "application.send_failed", "application", applicationId, { attemptId, code, detail }, this.now());
-      return { attemptId, state: previousState, outcome: null, receiptHash: null, externalId: null, blocked: { code, detail } };
+      const currentState = String(db.prepare("SELECT state FROM application_attempts WHERE id=?").get(attemptId)!["state"]);
+      return { attemptId, state: currentState, outcome: null, receiptHash: null, externalId: null, blocked: { code, detail } };
     } finally {
       await tracked?.session.close().catch(() => undefined);
     }
@@ -192,7 +202,13 @@ export class SubmissionService {
     return { swept: stale.length };
   }
 
-  #gates(attempt: Record<string, unknown>, applicationId: string, formUrl: string, adapter: ApplicationAdapter, db: DatabaseSync): Gate | null {
+  #gates(attempt: Record<string, unknown>, applicationId: string, formUrl: string, adapter: ApplicationAdapter, db: DatabaseSync, claimed = false): Gate | null {
+    const application = db.prepare("SELECT state,selected_resume_id FROM applications WHERE id=?").get(applicationId);
+    if (!application || ["submitted", "rejected"].includes(String(application["state"])) ||
+        db.prepare("SELECT 1 FROM application_attempts WHERE application_id=? AND state='submitted' LIMIT 1").get(applicationId))
+      return { code: "application_finished", detail: "This application already has a recorded outcome; nothing is sent again" };
+    if (application["selected_resume_id"] !== attempt["resume_id"])
+      return { code: "resume_changed", detail: "The selected resume changed; prepare and review a new attempt before sending" };
     const settings = this.deps.store.current().value;
     if (!settings.enabled) return { code: "jobs_disabled", detail: "Jobs are disabled; no submission is sent" };
     if (settings.paused) return { code: "jobs_paused", detail: "Jobs are paused; no submission is sent" };
@@ -228,7 +244,7 @@ export class SubmissionService {
       const since = new Date(this.now() - 24 * 60 * 60 * 1000).toISOString();
       const used = db.prepare(`SELECT count(*) AS n FROM application_attempts a JOIN source_policies p ON p.id=a.policy_id
         WHERE p.scope_key=? AND a.send_started_at IS NOT NULL AND a.send_started_at >= ? AND a.state IN('submitting','submitted','unknown')`).get(policy.scopeKey, since) as Record<string, unknown>;
-      if (Number(used["n"]) >= cap) return { code: "cap_reached", detail: `The site policy allows ${cap} submission(s) per day and that is already used` };
+      if (Number(used["n"]) - (claimed ? 1 : 0) >= cap) return { code: "cap_reached", detail: `The site policy allows ${cap} submission(s) per day and that is already used` };
     }
     return null;
   }

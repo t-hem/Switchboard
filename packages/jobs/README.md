@@ -1,5 +1,8 @@
 # Jobs service
 
+See the [2026-09-17 review](../../JOBS-REVIEW-2026-09-17.md) for hardening changes and
+remaining release blockers, including incomplete non-submission stage-review gates.
+
 Linux-only, optional, and independent of Switchboard. Discovery, evidence capture,
 screening, resume rendering, application preparation and gated submission all run; the
 model-driven tailoring pass does not yet, because its tool bridge is missing (see
