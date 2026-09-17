@@ -1,3 +1,4 @@
+import { POLL_INTERVAL_MS } from "../state/polling.ts";
 import type { Session } from "../types.ts";
 
 /**
@@ -6,8 +7,17 @@ import type { Session } from "../types.ts";
  */
 export type Activity = "working" | "quiet" | "waiting" | "exited" | "unknown";
 
-const WORKING_MS = 5_000;
+/**
+ * Every threshold here must clear the poll interval with room to spare. A session
+ * that is genuinely producing output still carries a `lastOutputAt` up to one poll
+ * old, so a boundary at exactly the interval is crossed and uncrossed on alternate
+ * polls — the row flickers between two labels while nothing has actually changed.
+ * Doubling the interval means one late or dropped poll cannot move a live session
+ * out of "working", and only a real silence does.
+ */
+const WORKING_MS = POLL_INTERVAL_MS * 2;
 const WAITING_MS = 20_000;
+const JUST_NOW_MS = POLL_INTERVAL_MS * 2;
 
 export function activityOf(session: Session, now: number): Activity {
   if (session.status === "exited") return "exited";
@@ -43,7 +53,7 @@ export function StatusDot({ activity }: { activity: Activity }) {
 
 export function relativeTime(from: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - from) / 1000));
-  if (seconds < 5) return "just now";
+  if (seconds * 1000 < JUST_NOW_MS) return "just now";
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;

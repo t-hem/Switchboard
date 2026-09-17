@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HttpError, api } from "../api/client.ts";
 import type { HostEntry, HostState, SessionRef } from "../types.ts";
-
-const POLL_INTERVAL_MS = 5000;
+import { POLL_INTERVAL_MS } from "./polling.ts";
 
 function initialState(entry: HostEntry): HostState {
   return {

@@ -6,6 +6,7 @@ const HOSTS_KEY = "switchboard.hosts";
 const CLIENT_ID_KEY = "switchboard.clientId";
 const CLIENT_LABEL_KEY = "switchboard.clientLabel";
 const SIDEBAR_KEY = "switchboard.sidebarCollapsed";
+const LOCKED_KEY = "switchboard.lockedSessions";
 
 /** localStorage throws in some privacy modes; never let that take the app down. */
 function read(key: string): string | null {
@@ -92,4 +93,28 @@ export function sidebarCollapsed(): boolean {
 
 export function setSidebarCollapsed(collapsed: boolean): void {
   write(SIDEBAR_KEY, collapsed ? "1" : "0");
+}
+
+/**
+ * Session ids the operator has locked against an accidental close.
+ *
+ * Deliberately client-local: a lock guards against a misclick in *this* browser,
+ * which is the only thing a confirm step was ever protecting against. Putting it on
+ * the daemon would make it fleet state that has to be synced and reconciled, to
+ * protect against a mistake that cannot happen anywhere but here.
+ */
+export function lockedSessions(): Set<string> {
+  const raw = read(LOCKED_KEY);
+  if (raw === null) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v): v is string => typeof v === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveLockedSessions(ids: Iterable<string>): void {
+  write(LOCKED_KEY, JSON.stringify([...ids]));
 }

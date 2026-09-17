@@ -118,6 +118,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     version: deps.version,
     agents: deps.registry.list(),
     sessionCount: deps.sessions.count,
+    sessionBackend: deps.hostConfig.sessionBackend ?? "direct",
   }));
 
   // --- websocket stream -----------------------------------------------------

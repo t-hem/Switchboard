@@ -27,6 +27,8 @@ export type Health = {
   version: string;
   agents: AgentInfo[];
   sessionCount: number;
+  /** Optional: this bundle may be talking to a daemon older than the field. */
+  sessionBackend?: "direct" | "tmux";
 };
 
 export type Orphan = {

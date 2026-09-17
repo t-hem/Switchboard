@@ -70,6 +70,9 @@ export type HealthResponse = {
   version: string;
   agents: { name: string; available: boolean }[];
   sessionCount: number;
+  /** Which backend this host spawns into. A display fact about the host, so the
+   *  client can say it once per host instead of inferring it from each session. */
+  sessionBackend: "direct" | "tmux";
 };
 
 export type AgentsConfigResponse = AgentsConfig & {
