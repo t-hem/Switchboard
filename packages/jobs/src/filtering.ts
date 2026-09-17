@@ -1,3 +1,5 @@
+import { containsTerm } from "./terms.js";
+
 /**
  * Deterministic, explainable candidate screening. It never invents a value: a filter that
  * cannot be evaluated because the posting omits the field yields `needs_review`, not a
@@ -107,7 +109,7 @@ export function screenJob(input: {
   if (keywords.length) {
     if (!input.descriptionText.trim()) { unknown = true; reasons.push({ code: "keywords_unknown", detail: "Posting has no description text; cannot match keywords" }); }
     else {
-      const matched = keywords.filter(keyword => haystack.includes(keyword.toLowerCase()));
+      const matched = keywords.filter(keyword => containsTerm(haystack, keyword));
       score += matched.length * 2;
       if (matched.length) reasons.push({ code: "keywords_matched", detail: `Matched: ${matched.join(", ")}` });
       else { excluded = true; reasons.push({ code: "keywords_mismatch", detail: `No configured keyword (${keywords.join(", ")}) appears` }); }
@@ -119,7 +121,7 @@ export function screenJob(input: {
     const location = normalizeLocation(input.location);
     if (!location.known) { unknown = true; reasons.push({ code: "location_unknown", detail: "Location is not stated; not treated as a mismatch" }); }
     else {
-      const matched = locations.some(wanted => location.value!.toLowerCase().includes(wanted.toLowerCase()));
+      const matched = locations.some(wanted => containsTerm(location.value!, wanted));
       if (matched) { score += 2; reasons.push({ code: "location_matched", detail: location.value! }); }
       else { excluded = true; reasons.push({ code: "location_mismatch", detail: `${location.value} does not match ${locations.join(", ")}` }); }
     }

@@ -1183,10 +1183,10 @@ Approved to proceed; see implementation entries below.
   (`bulletId`, prose, tags, structured filters, evidence) and base templates — with
   strict validation before storage and JSON export/import that only ever appends new
   revisions. A malformed entry is rejected; existing history is never rewritten.
-- `resume.ts` selects bullets deterministically and explainably (tag overlap with the
-  job title/description, stable tie-break, `as-listed` alternative) and renders a
-  `StructuredResume`: heading plus template-ordered sections (`facts`, `tags`,
-  `bullets` with a slot limit). Missing required facts and unfilled slots are recorded in
+- `resume.ts` selects bullets deterministically and explainably (whole-term tag overlap
+  with the job title/description, stable tie-break, `as-listed` alternative) and renders a
+  `StructuredResume`: heading plus template-ordered sections (`facts`, `tags` —
+  confirmed skill facts only, never bullet tags — and `bullets` with a slot limit). Missing required facts and unfilled slots are recorded in
   `missing` and printed as an explicit omissions line — omissions are visible, never
   guessed, and unverified suggestions are excluded. The render stores the text artifact
   and a `resume_versions` row (`phase='render'`, `pdf_artifact_hash=NULL`) referencing

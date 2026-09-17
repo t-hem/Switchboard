@@ -104,6 +104,8 @@ test("a render produces structured source and a text artifact with no invented c
   assert.match(experience.lines[0]!, /Go|PostgreSQL|Kafka/, "job-relevant bullets rank first");
   assert.ok(rendered.structured.missing.some(entry => /Education/.test(entry)), "omissions are visible");
   assert.equal(rendered.structured.sections.find(section => section.id === "skills")!.lines.includes("Rust"), false, "suggestions are never rendered as facts");
+  assert.deepEqual(rendered.structured.sections.find(section => section.id === "skills")!.lines, ["Go", "Kubernetes", "PostgreSQL"],
+    "only confirmed skill facts are printed; bullet tags such as kafka or support are matching metadata");
 
   const text = Buffer.from(artifacts.read(rendered.textArtifactHash)).toString("utf8");
   assert.match(text, /Ada Lovelace/);
@@ -141,6 +143,8 @@ test("bullet selection is deterministic and explainable", () => {
   assert.deepEqual(first.map(entry => entry.bulletId), second.map(entry => entry.bulletId));
   assert.ok(first[0]!.matched.length > 0);
   assert.equal(first.length, 2);
+  assert.deepEqual(selectBullets(revisions, { title: "Ongoing support", descriptionText: "Going forward" }, 1)[0]!.matched, ["support"],
+    "a tag matches whole terms only: go is not found inside ongoing or going");
   const asListed = selectBullets(revisions, { title: "", descriptionText: "" }, 2, "as-listed");
   assert.deepEqual(asListed.map(entry => entry.bulletId), ["b-go", "b-support"]);
 });

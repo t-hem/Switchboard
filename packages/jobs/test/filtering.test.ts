@@ -32,6 +32,17 @@ test("location and salary normalize without inventing values or converting curre
   assert.equal(extractSalaryText("No compensation details here."), null);
 });
 
+test("keywords and locations match whole terms, not fragments of longer words", () => {
+  const screen = (descriptionText: string, filters: { keywords?: string[]; locations?: string[] }, location = "Remote") =>
+    screenJob({ title: "Software Engineer", descriptionText, location, filters });
+  assert.equal(screen("We build in JavaScript.", { keywords: ["java"] }).decision, "excluded");
+  assert.equal(screen("An international team.", { keywords: ["intern"] }).decision, "excluded");
+  assert.equal(screen("Java and Spring services.", { keywords: ["java"] }).decision, "eligible");
+  assert.equal(screen("Modern C++ and .NET.", { keywords: ["c++", ".net"] }).reasons.find(reason => reason.code === "keywords_matched")!.detail, "Matched: c++, .net");
+  assert.equal(screen("Body", { locations: ["NY"] }, "Sunnyvale, CA").decision, "excluded");
+  assert.equal(screen("Body", { locations: ["NY"] }, "New York, NY").decision, "eligible");
+});
+
 test("role families classify technical roles and leave ambiguous ones unset", () => {
   assert.equal(classifyFamily("Help Desk Technician", ""), "support");
   assert.equal(classifyFamily("Site Reliability Engineer", ""), "cloud");

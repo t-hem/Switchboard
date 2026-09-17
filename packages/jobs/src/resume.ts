@@ -4,6 +4,7 @@ import { transaction } from "./database.js";
 import { event } from "./events.js";
 import { AppError } from "./errors.js";
 import { ArtifactStore } from "./artifacts.js";
+import { containsTerm } from "./terms.js";
 import { Library, type BulletRevision, type ProfileRevision, type TemplateRevision } from "./library.js";
 
 /** Deterministic, explainable bullet selection. Model-driven tailoring is a later stage. */
@@ -24,7 +25,7 @@ const jobTextOf = (job: { title: string; descriptionText: string }): string => `
 export function rankBullets(bullets: BulletRevision[], job: { title: string; descriptionText: string }): SelectedBullet[] {
   const jobText = jobTextOf(job);
   return bullets.map(bullet => {
-    const matched = bullet.tags.filter(tag => jobText.includes(tag.toLowerCase()));
+    const matched = bullet.tags.filter(tag => containsTerm(jobText, tag));
     return { bulletId: bullet.bulletId, revisionId: bullet.id, prose: bullet.prose, tags: bullet.tags, matched, score: matched.length };
   });
 }
@@ -66,8 +67,8 @@ export function buildStructured(input: {
       }
       sections.push({ id: section.id, title: section.title, lines });
     } else if (section.type === "tags") {
+      // Only confirmed skill facts are printed. Bullet tags are matching metadata, never resume content.
       const tags = new Set<string>();
-      for (const bullet of input.bullets) for (const tag of bullet.tags) tags.add(tag);
       for (const fact of input.profile.data.facts) if (/^skills?$/i.test(fact.key)) for (const value of fact.value.split(/[,;]/)) if (value.trim()) tags.add(value.trim());
       const sorted = [...tags].sort((a, b) => a.localeCompare(b));
       if (!sorted.length) missing.push(`${section.title}: skills`);
