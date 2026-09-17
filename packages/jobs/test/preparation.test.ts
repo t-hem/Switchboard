@@ -19,7 +19,7 @@ const uniFields: FormField[] = [
   { name: "workAuth", label: "Work authorization", type: "select", required: true, options: ["yes", "no"] },
 ];
 
-function fixture(t: TestContext, options: { maxCaptureAgeMs?: number; withSnapshot?: boolean; withResume?: boolean } = {}) {
+function fixture(t: TestContext, options: { maxCaptureAgeMs?: number; withSnapshot?: boolean; withResume?: boolean; createSession?: () => import("../src/adapters/application.js").FormSession } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jobs-prep-"));
   const store = new SettingsStore(path.join(dir, "jobs.sqlite"));
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -40,14 +40,14 @@ function fixture(t: TestContext, options: { maxCaptureAgeMs?: number; withSnapsh
       VALUES(?,?,?,?,NULL,NULL,'render','{}','[]','{}',?,NULL,?)`).run(resumeId, snapshotId, profile.id, template.id, hash, new Date(NOW).toISOString());
     store.db.prepare("UPDATE applications SET selected_resume_id=? WHERE id=?").run(resumeId, application.id);
   }
-  const preparation = new PreparationService({ store, db: store.db, artifacts, http: offline, now: () => NOW, maxCaptureAgeMs: options.maxCaptureAgeMs });
+  const preparation = new PreparationService({ store, db: store.db, artifacts, http: offline, now: () => NOW, maxCaptureAgeMs: options.maxCaptureAgeMs, createSession: options.createSession });
   return { store, artifacts, preparation, jobId, applicationId: application.id, snapshotId };
 }
 const run = (id: string, options: Record<string, unknown> = {}, answers: Record<string, string> = {}) =>
   ({ applicationId: id, adapterId: "fixture", adapterOptions: { fields: uniFields, ...options }, formUrl: "https://forms.example/apply", answers, settingsRevision: 1, allowPrivate: false });
 
 test("application adapters are a registry with an honest manual default", () => {
-  assert.deepEqual(applicationAdapterIds(), ["fixture", "manual"]);
+  assert.deepEqual(applicationAdapterIds(), ["fixture", "fixture-form", "manual"]);
   assert.equal(createApplicationAdapter("fixture").capabilities.submit, false, "step 9 never claims submission");
   assert.equal(createApplicationAdapter("manual").capabilities.prepare, false);
   assert.throws(() => createApplicationAdapter("nope"), /No application adapter/);
@@ -96,6 +96,35 @@ test("an unsupported required field blocks and never presents a partial form as 
   assert.equal(outcome.code, "unsupported_required_fields");
   assert.match(outcome.detail ?? "", /workAuth/);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM application_attempts").get()!.n, 0, "a blocked preparation writes no attempt");
+});
+
+test("changed answers create a new attempt instead of reusing a reviewed one", async (t) => {
+  const { store, preparation, applicationId } = fixture(t);
+  const first = await preparation.prepare(run(applicationId, {}, { name: "Ada", workAuth: "yes" }));
+  const changed = await preparation.prepare(run(applicationId, {}, { name: "Ada", workAuth: "no" }));
+  assert.equal(changed.created, true);
+  assert.notEqual(changed.attemptId, first.attemptId);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM application_attempts").get()!.n, 2);
+  assert.match(String((changed.manifest as Record<string, unknown>)["manifestHash"]), /^[a-f0-9]{64}$/);
+});
+
+test("a browser session is opened for the browser adapter and always closed", async (t) => {
+  const sessions: { closed: boolean }[] = [];
+  const { preparation, applicationId } = fixture(t, { createSession: () => {
+    const session: import("../src/adapters/application.js").FormSession = {
+      async open(url) { return { formUrl: url, finalUrl: url, pageUrl: url, captcha: false, automationForbidden: false,
+        fields: [{ name: "name", label: "Name", type: "text", required: true }, { name: "resume", label: "Resume", type: "file", required: true }] }; },
+      async fill() {}, async uploadFile() {}, async observe() { return { finalUrl: "u", filled: [], uploads: [] }; },
+      async clickPreview() { return true; },
+      async close() { (session as unknown as { closed: boolean }).closed = true; },
+    } as unknown as import("../src/adapters/application.js").FormSession;
+    sessions.push(session as unknown as { closed: boolean });
+    return session;
+  } });
+  const outcome = await preparation.prepare({ ...run(applicationId, {}, { name: "Ada" }), adapterId: "fixture-form" });
+  assert.equal(outcome.state, "draft", outcome.detail);
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]!.closed, true, "the browser session never outlives one preparation");
 });
 
 test("CAPTCHA, forbidden automation and a manual adapter produce durable inbox handoffs", async (t) => {

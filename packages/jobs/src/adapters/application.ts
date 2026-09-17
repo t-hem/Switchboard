@@ -12,9 +12,27 @@ export type ApplicationCapabilities = { prepare: boolean; fill: boolean; upload:
 export type FormFieldType = "text" | "email" | "tel" | "url" | "textarea" | "select" | "checkbox" | "file" | "hidden";
 export type FormField = { name: string; label: string; type: FormFieldType; required: boolean; options?: string[]; accept?: string[] };
 export type FormInspection = { formUrl: string; finalUrl: string; fields: FormField[]; captcha: boolean; automationForbidden: boolean };
-export type FileUpload = { field: string; artifactHash: string; filename: string; mimeType: string };
+export type FileUpload = { field: string; artifactHash: string; filename: string; mimeType: string; /** Local artifact path the browser must upload; absent for in-process adapters. */ localPath?: string };
 export type PreparedForm = { filled: { field: string; value: string }[]; uploads: FileUpload[]; missing: string[]; note?: string };
-export type ApplicationContext = { http: HttpClient; allowPrivate: boolean };
+
+/** What the page actually shows after filling: evidence, not the values the adapter intended. */
+export type UploadedFile = { field: string; fileName: string; sizeBytes: number };
+export type ObservedForm = { finalUrl: string; filled: { field: string; value: string }[]; uploads: UploadedFile[] };
+
+/**
+ * Browser seam. A real implementation drives the supervised browser; unit tests supply a
+ * fake. `clickPreview` must target the site's own non-submitting validation control and
+ * must never press submit — submission is a separate, later capability.
+ */
+export interface FormSession {
+  open(url: string, options: { allowPrivate: boolean; timeoutMs: number }): Promise<FormInspection & { pageUrl: string }>;
+  fill(field: string, value: string): Promise<void>;
+  uploadFile(field: string, filePath: string): Promise<void>;
+  observe(): Promise<ObservedForm>;
+  clickPreview(): Promise<boolean>;
+  close(): Promise<void>;
+}
+export type ApplicationContext = { http: HttpClient; allowPrivate: boolean; session?: FormSession };
 
 export interface ApplicationAdapter {
   readonly id: string;
@@ -77,6 +95,47 @@ export class FixtureApplicationAdapter implements ApplicationAdapter {
 }
 
 type Factory = (options?: Record<string, unknown>) => ApplicationAdapter;
+/** A browser-backed adapter over an injected `FormSession`; it needs the supervised browser. */
+export class FixtureFormAdapter implements ApplicationAdapter {
+  readonly id = "fixture-form";
+  readonly version = "1";
+  readonly capabilities: ApplicationCapabilities = { prepare: true, fill: true, upload: true, submit: false, reconcile: false };
+  async inspect(formUrl: string, context: ApplicationContext): Promise<FormInspection> {
+    const session = requireSession(context);
+    const opened = await session.open(formUrl, { allowPrivate: context.allowPrivate, timeoutMs: 20_000 });
+    return { formUrl, finalUrl: opened.pageUrl, fields: opened.fields, captcha: opened.captcha, automationForbidden: opened.automationForbidden };
+  }
+  async prepare(input: { inspection: FormInspection; answers: Record<string, string>; resume: FileUpload }, context: ApplicationContext): Promise<PreparedForm> {
+    const session = requireSession(context);
+    const intended: PreparedForm = { filled: [], uploads: [], missing: [] };
+    for (const field of input.inspection.fields) {
+      if (field.type === "hidden") continue;
+      if (field.type === "file") {
+        if (field.name === input.resume.field) {
+          if (!input.resume.localPath) { intended.missing.push(field.name); continue; }
+          await session.uploadFile(field.name, input.resume.localPath);
+          intended.uploads.push(input.resume);
+        } else if (field.required) intended.missing.push(field.name);
+        continue;
+      }
+      const raw = input.answers[field.name];
+      if (raw === undefined || raw === "") { if (field.required) intended.missing.push(field.name); continue; }
+      if (field.type === "select" && field.options && !field.options.includes(raw)) { intended.missing.push(field.name); continue; }
+      await session.fill(field.name, field.type === "checkbox" ? "true" : raw);
+      intended.filled.push({ field: field.name, value: raw });
+    }
+    // A partial form is never presented as ready, and a preview is never triggered for one.
+    if (intended.missing.length) return intended;
+    const observed = await session.observe(); // report what the page shows, not what we typed
+    await session.clickPreview();             // the site's own validation control, never submit
+    return { filled: observed.filled, uploads: intended.uploads, missing: [] };
+  }
+}
+function requireSession(context: ApplicationContext): FormSession {
+  if (!context.session) throw new AppError("session_unavailable", "This adapter needs the supervised browser session", 409);
+  return context.session;
+}
+
 const factories = new Map<string, Factory>();
 export function registerApplicationAdapter(id: string, factory: Factory): void { factories.set(id, factory); }
 export function applicationAdapterIds(): string[] { return [...factories.keys()].sort(); }
@@ -87,3 +146,4 @@ export function createApplicationAdapter(id: string, options?: Record<string, un
 }
 registerApplicationAdapter("manual", () => new ManualApplicationAdapter());
 registerApplicationAdapter("fixture", options => new FixtureApplicationAdapter(options as ConstructorParameters<typeof FixtureApplicationAdapter>[0]));
+registerApplicationAdapter("fixture-form", () => new FixtureFormAdapter());

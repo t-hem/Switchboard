@@ -8,7 +8,7 @@ import type { ArtifactStore } from "./artifacts.js";
 import { Reviews } from "./reviews.js";
 import { TaskQueue } from "./queue.js";
 import type { HttpClient } from "./net.js";
-import { createApplicationAdapter, type ApplicationAdapter, type FileUpload } from "./adapters/application.js";
+import { createApplicationAdapter, type ApplicationAdapter, type FileUpload, type FormSession } from "./adapters/application.js";
 
 export const MAX_CAPTURE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -32,7 +32,7 @@ const resumeFilename = (applicationId: string): string => `resume-${applicationI
  */
 export class PreparationService {
   private readonly now: () => number;
-  constructor(private readonly deps: { store: SettingsStore; db: DatabaseSync; artifacts: ArtifactStore; http: HttpClient; now?: () => number; maxCaptureAgeMs?: number }) {
+  constructor(private readonly deps: { store: SettingsStore; db: DatabaseSync; artifacts: ArtifactStore; http: HttpClient; now?: () => number; maxCaptureAgeMs?: number; /** Opened only when an adapter needs the supervised browser; always closed. */ createSession?: () => FormSession }) {
     this.now = deps.now ?? Date.now;
     this.captureAge = deps.maxCaptureAgeMs ?? MAX_CAPTURE_AGE_MS;
   }
@@ -61,48 +61,62 @@ export class PreparationService {
     catch { return blocked("corrupt_resume", "The selected resume artifact is missing or corrupt; workflow remains blocked"); }
 
     const adapter = createApplicationAdapter(input.adapterId, input.adapterOptions);
-    const context = { http: this.deps.http, allowPrivate: input.allowPrivate === true };
     if (!adapter.capabilities.prepare) return this.#handoff(input, adapter, "manual_handoff", "This adapter has no form automation; complete the form manually", snapshot, resumeId);
 
-    let inspection;
-    try { inspection = await adapter.inspect(input.formUrl, context); }
-    catch (error) { return blocked("form_unavailable", error instanceof Error ? error.message : String(error)); }
-    if (inspection.captcha) return this.#handoff(input, adapter, "captcha", "The form presents a CAPTCHA; complete it manually", snapshot, resumeId, inspection.formUrl);
-    if (inspection.automationForbidden) return this.#handoff(input, adapter, "forbidden_automation", "Automation is not permitted for this target", snapshot, resumeId, inspection.formUrl);
+    // Identical inputs reuse the same draft and never touch the browser twice. Answers are
+    // part of the key, so changing them invalidates a prior review rather than silently reusing it.
+    const idempotencyKey = this.#idempotencyKey(input, snapshot, resume);
+    const existing = db.prepare("SELECT id,manifest_json FROM application_attempts WHERE idempotency_key=?").get(idempotencyKey) as Record<string, unknown> | undefined;
+    if (existing) return { attemptId: String(existing["id"]), created: false, state: "draft", manifest: JSON.parse(String(existing["manifest_json"])) as Record<string, unknown> };
 
-    const resumeUpload: FileUpload = { field: "resume", artifactHash: String(resume["text_artifact_hash"]), filename: resumeFilename(String(application["id"])), mimeType: "text/plain" };
-    const prepared = await adapter.prepare({ inspection, answers: input.answers, resume: resumeUpload }, context);
-    if (prepared.missing.length) return blocked("unsupported_required_fields", `Required fields could not be filled: ${prepared.missing.join(", ")}`);
+    const session = this.deps.createSession?.() ?? undefined;
+    const context = { http: this.deps.http, allowPrivate: input.allowPrivate === true, session };
+    try {
+      let inspection;
+      try { inspection = await adapter.inspect(input.formUrl, context); }
+      catch (error) { return blocked("form_unavailable", error instanceof Error ? error.message : String(error)); }
+      if (inspection.captcha) return this.#handoff(input, adapter, "captcha", "The form presents a CAPTCHA; complete it manually", snapshot, resumeId, inspection.formUrl);
+      if (inspection.automationForbidden) return this.#handoff(input, adapter, "forbidden_automation", "Automation is not permitted for this target", snapshot, resumeId, inspection.formUrl);
 
-    const manifest: Record<string, unknown> = {
-      applicationId: application["id"], jobId: application["job_id"],
-      snapshotId: snapshot["id"], snapshotContentHash: snapshot["content_hash"], snapshotCapturedAt: snapshot["captured_at"],
-      resumeVersionId: resumeId, resumeTextHash: resume["text_artifact_hash"], resumeBytes: resumeBytes.byteLength,
-      settingsRevision: input.settingsRevision, adapterId: adapter.id, adapterVersion: adapter.version,
-      formUrl: inspection.formUrl, finalUrl: inspection.finalUrl, fields: inspection.fields,
-      filled: prepared.filled, uploads: prepared.uploads, answers: input.answers,
-      preparedAt: new Date(this.now()).toISOString(), status: "draft",
-    };
-    const manifestHash = digest(manifest);
-    const idempotencyKey = digest({ applicationId: application["id"], snapshot: snapshot["content_hash"], resume: resume["text_artifact_hash"],
-      settingsRevision: input.settingsRevision, adapterId: adapter.id, formUrl: inspection.formUrl });
+      const resumeUpload: FileUpload = { field: "resume", artifactHash: String(resume["text_artifact_hash"]), filename: resumeFilename(String(application["id"])),
+        mimeType: "text/plain", localPath: this.deps.artifacts.localPath(String(resume["text_artifact_hash"])) };
+      const prepared = await adapter.prepare({ inspection, answers: input.answers, resume: resumeUpload }, context);
+      if (prepared.missing.length) return blocked("unsupported_required_fields", `Required fields could not be filled: ${prepared.missing.join(", ")}`);
 
-    return transaction(this.deps.db, () => {
-      const existing = db.prepare("SELECT id,manifest_json FROM application_attempts WHERE idempotency_key=?").get(idempotencyKey) as Record<string, unknown> | undefined;
-      if (existing) {
-        return { attemptId: String(existing["id"]), created: false, state: "draft", manifest: JSON.parse(String(existing["manifest_json"])) as Record<string, unknown> };
-      }
-      const policyId = this.#policy(adapter.id, inspection.formUrl);
-      const attemptId = randomUUID();
-      const time = new Date(this.now()).toISOString();
-      db.prepare(`INSERT INTO application_attempts(id,application_id,idempotency_key,adapter_id,state,snapshot_id,resume_id,settings_revision,policy_id,manifest_json,preflight_at,created_at)
-        VALUES(?,?,?,?,'draft',?,?,?,?,?,?,?)`).run(attemptId, String(application["id"]), idempotencyKey, adapter.id, String(snapshot["id"]), resumeId,
-        input.settingsRevision, policyId, JSON.stringify({ ...manifest, manifestHash }), time, time);
-      db.prepare("UPDATE applications SET state='review_required',block_reason=NULL,updated_at=? WHERE id=? AND state IN('discovered','captured','screened','preparing','needs_input','review_required')")
-        .run(time, String(application["id"]));
-      event(db, "application.prepared", "application", String(application["id"]), { attemptId, manifestHash, adapterId: adapter.id }, this.now());
-      return { attemptId, created: true, state: "draft", manifest: { ...manifest, manifestHash } };
-    });
+      const manifest: Record<string, unknown> = {
+        applicationId: application["id"], jobId: application["job_id"],
+        snapshotId: snapshot["id"], snapshotContentHash: snapshot["content_hash"], snapshotCapturedAt: snapshot["captured_at"],
+        resumeVersionId: resumeId, resumeTextHash: resume["text_artifact_hash"], resumeBytes: resumeBytes.byteLength,
+        settingsRevision: input.settingsRevision, adapterId: adapter.id, adapterVersion: adapter.version,
+        formUrl: inspection.formUrl, finalUrl: inspection.finalUrl, fields: inspection.fields,
+        filled: prepared.filled, uploads: prepared.uploads, answers: input.answers,
+        preparedAt: new Date(this.now()).toISOString(), status: "draft",
+      };
+      const manifestHash = digest(manifest);
+
+      return transaction(this.deps.db, () => {
+        const policyId = this.#policy(adapter.id, inspection.formUrl);
+        const attemptId = randomUUID();
+        const time = new Date(this.now()).toISOString();
+        db.prepare(`INSERT INTO application_attempts(id,application_id,idempotency_key,adapter_id,state,snapshot_id,resume_id,settings_revision,policy_id,manifest_json,preflight_at,created_at)
+          VALUES(?,?,?,?,'draft',?,?,?,?,?,?,?)`).run(attemptId, String(application["id"]), idempotencyKey, adapter.id, String(snapshot["id"]), resumeId,
+          input.settingsRevision, policyId, JSON.stringify({ ...manifest, manifestHash }), time, time);
+        db.prepare("UPDATE applications SET state='review_required',block_reason=NULL,updated_at=? WHERE id=? AND state IN('discovered','captured','screened','preparing','needs_input','review_required')")
+          .run(time, String(application["id"]));
+        event(db, "application.prepared", "application", String(application["id"]), { attemptId, manifestHash, adapterId: adapter.id }, this.now());
+        return { attemptId, created: true, state: "draft", manifest: { ...manifest, manifestHash } };
+      });
+    } finally {
+      // The supervised browser session never outlives one preparation.
+      await session?.close().catch(() => undefined);
+    }
+  }
+
+  #idempotencyKey(input: { applicationId: string; adapterId: string; formUrl: string; answers: Record<string, string>; settingsRevision: number },
+    snapshot: Record<string, unknown>, resume: Record<string, unknown>): string {
+    const answersHash = digest(Object.keys(input.answers).sort().map(key => [key, input.answers[key]]));
+    return digest({ applicationId: input.applicationId, snapshot: snapshot["content_hash"], resume: resume["text_artifact_hash"],
+      settingsRevision: input.settingsRevision, adapterId: input.adapterId, formUrl: input.formUrl, answersHash });
   }
 
   /** A handoff is a durable inbox item, not an alert: resume, answers and URL included. */

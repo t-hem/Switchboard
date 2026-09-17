@@ -51,6 +51,13 @@ export class ArtifactStore {
     if(bytes.length!==artifact.sizeBytes || digest(bytes)!==artifact.hash)throw new AppError("artifact_corrupt","Artifact integrity check failed; workflow must remain blocked",409);
     return bytes;
   }
+  /** Absolute path of a verified artifact, for handing a real file to the browser. */
+  localPath(hash: string): string {
+    const artifact = this.get(hash);
+    if (!artifact) throw new AppError("artifact_missing", "Unknown artifact", 404);
+    if (artifact.relativePath !== `artifacts/${hash}`) throw new AppError("artifact_corrupt", "Invalid artifact path", 409);
+    return path.join(this.root, artifact.relativePath);
+  }
   inspect():{sqlite:string[];foreignKeys:unknown[];artifactErrors:{hash:string;code:string}[];unreferencedFiles:string[];stagingFiles:string[]} {
     const rows=this.db.prepare("SELECT hash FROM artifacts").all();const known=new Set(rows.map(row=>String(row["hash"])));
     const artifactErrors:{hash:string;code:string}[]=[];
