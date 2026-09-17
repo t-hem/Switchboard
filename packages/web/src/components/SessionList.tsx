@@ -114,11 +114,11 @@ export function SessionList({
                         tabIndex={0}
                         aria-pressed={isLocked}
                         title={isLocked ? "Unlock to allow closing" : "Lock against an accidental close"}
-                        className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                          isLocked
-                            ? "text-amber-400 hover:bg-neutral-800"
-                            : "text-neutral-700 hover:bg-neutral-800 hover:text-neutral-300"
-                        }`}
+                        // No colour classes: these glyphs are colour emoji and paint from
+                        // their own palette, so a text colour here renders nothing and only
+                        // reads as intent that is not happening. Open versus closed shackle
+                        // is what distinguishes the states.
+                        className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-neutral-800"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleLock(session.id);
@@ -142,12 +142,17 @@ export function SessionList({
                               ? "Remove from the list"
                               : "Kill this session"
                         }
+                        // Locked keeps the unlocked colour and is scaled down by opacity
+                        // rather than given a darker token of its own. Two different
+                        // colour tokens have to be compared to be trusted, and that
+                        // comparison got this backwards once already; an opacity cannot
+                        // resolve to something brighter than the value it applies to.
                         className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
                           isLocked
-                            ? "cursor-not-allowed text-neutral-800"
+                            ? "cursor-not-allowed text-neutral-400 opacity-40"
                             : armed
                               ? "bg-red-900/60 text-red-200 hover:bg-red-900"
-                              : "text-neutral-600 hover:bg-neutral-800 hover:text-red-400"
+                              : "text-neutral-400 hover:bg-neutral-800 hover:text-red-400"
                         }`}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -206,17 +211,6 @@ function HostHeader({
         {state.entry.label}
       </span>
       <HostBadge state={state} now={now} />
-      {/* The backend is a property of the host, not of any one session, so it is
-          stated once here rather than repeated on every row. It buys survival of a
-          daemon restart; a reboot takes the tmux server with it (LINUX-SESSIONS.md). */}
-      {state.status === "ok" && state.health?.sessionBackend === "tmux" && (
-        <span
-          className="shrink-0 text-[11px] text-neutral-600"
-          title="Sessions run under tmux and outlive the daemon process. A host reboot still ends them."
-        >
-          persists across daemon restarts
-        </span>
-      )}
       <span className="flex-1" />
       {state.status === "ok" && (
         <button
