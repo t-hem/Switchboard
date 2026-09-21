@@ -214,7 +214,9 @@ prompt.
 | `pi-terminal-theme` 0.2.0 | 2 | `terminal`, `terminal-tinted` — built on ANSI 0–15 |
 
 Theme packages register nothing; they are file trees. The active theme lives in
-`~/.pi/agent/settings.json` (`"theme": "dark"` currently).
+`~/.pi/agent/settings.json` — currently a local file, `dark-plain`, under
+`~/.pi/agent/themes/`: Pi's built-in `dark` palette with all message/card
+backgrounds blanked out (see README.md for why).
 
 ---
 

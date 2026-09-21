@@ -44,8 +44,32 @@ them, clipboard chords going to the pty as control bytes, and single-click kills
 no confirmation.
 
 Still open: a full multi-machine fleet under load — the Windows box is out with
-unrelated hardware faults — and one low-priority rendering defect. See
+unrelated hardware faults. The last rendering defect — the resize flash that showed
+as full-width green and blue background blocks — was fixed on 2026-09-21 by removing
+the backgrounds from Pi's own theme rather than in this client; see
 [TESTING.md](./TESTING.md), which is honest about what is proven and what is not.
+
+### The green/blue background flash and what actually fixed it
+
+Resizing the terminal sometimes flashed whole rows of background: green
+(`48;5;22`, Pi's own tool cards) and blue (`48;5;17`, the pi-ask-user overlay).
+`packages/web/acceptance/resize-flash.mjs` pinned the cause on 2026-09-21: the
+colours were Pi's, not the client's — right after a resize, Pi's repaint briefly
+holds pane rows whose card background covers the full terminal width (four rows at
+100% against a steady state of one at 44%), and only its choice of card *backgrounds*
+made that visible.
+
+**The fix was a Pi theme, not Switchboard.** A custom theme —
+`~/.pi/agent/themes/dark-plain.json`, which is Pi's built-in `dark` palette with
+every message/card background mapping (`userMessageBg`, `customMessageBg`,
+`toolPendingBg`, `toolSuccessBg`, `toolErrorBg`) set to the empty string — makes Pi
+emit no background fills at all, so there is nothing left to flash. Syntax
+colouring was untouched; it was the card backgrounds that were failing. Verified
+with `packages/web/acceptance/themecheck.mjs`, which streams a fenced code block
+into a live Pi session under tmux and samples `capture-pane`: before, resize
+sampled rows at 100% full-width background coverage; after, 0% (the only residual
+is a single small 256-colour background index, `48;5;241`, from a non-card
+element — no full-width coverage, nothing to flash).
 
 ## Requirements
 

@@ -381,6 +381,19 @@ registers elsewhere, and it is the only piece worth changing — painting only c
 rows, and appending scrollback growth instead of replaying it, would cut how long a
 Pi transient lingers without touching the bug itself.
 
+**Resolved 2026-09-21 — the flash was killed by a Pi theme change, not a client
+fix.** A custom theme, `~/.pi/agent/themes/dark-plain.json` (Pi's built-in `dark`
+palette with every message/card background mapping — `userMessageBg`,
+`customMessageBg`, `toolPendingBg`, `toolSuccessBg`, `toolErrorBg` — set to the
+empty string), makes Pi emit no background fills, so there is nothing left to
+flash. Syntax colouring was untouched. Re-measured with
+`packages/web/acceptance/themecheck.mjs` under the same tmux sampling: resize now
+sees **0%** full-width background coverage (previously four rows at 100%), and the
+only residual on screen while streaming is a single small background index,
+`48;5;241`, from a non-card element. The upstream repaint transient itself is
+surely still in Pi — there is just no full-width card background left to make it
+visible. The client-side "how long a transient lingers" point above still stands.
+
 ---
 
 ## Re-running the suites
