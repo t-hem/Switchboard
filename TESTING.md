@@ -359,6 +359,28 @@ is not something this client drives. The remaining levers are all worse than the
 defect: shrink the scrollback, swap in the canvas or WebGL renderer addon, or cover
 the terminal during a resize. Leave it unless it starts costing something real.
 
+**Attributed 2026-09-21 — the flash is Pi's, and it is reproducible.**
+`packages/web/acceptance/resize-flash.mjs` resizes a live Pi session and samples the
+*pane content* as fast as tmux answers, which is the only way to see this: the
+transient survives ~10–25 ms, so any probe that waits even 100 ms after the resize
+sees a clean screen and concludes wrongly that nothing happened. Right after a resize
+to a narrower width, the pane grid itself holds rows whose card background covers the
+**full** terminal width — four rows at 100% against a steady state of one row at 44% —
+settling back within ~25 ms. Because that is in the pane grid, `tmux attach` in a plain
+terminal shows it too: it is not this client's paint path, and the existing "only when
+something is wrapped" clue fits, since cards wrap. Both colours belong to Pi —
+`48;5;22` for Pi's own tool cards and `48;5;17` for the `pi-ask-user` overlay (which
+draws its own `╭─ ask_user ─╮` box), plus `48;5;59` for the echoed prompt block — so it
+is Pi's repaint, not one extension. No Pi changelog entry through 0.86.1 mentions
+resize, repaint or reflow, so it is presumably still there; the fix belongs upstream.
+
+One part of this *is* the client's: the frames are snapshots taken on a cadence, so a
+~20 ms pane transient stays on screen until the next frame, where a plain terminal
+would repaint over it in ~10 ms. That is why it reads as a flash here when it barely
+registers elsewhere, and it is the only piece worth changing — painting only changed
+rows, and appending scrollback growth instead of replaying it, would cut how long a
+Pi transient lingers without touching the bug itself.
+
 ---
 
 ## Re-running the suites
