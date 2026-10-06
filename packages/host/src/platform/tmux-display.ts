@@ -16,17 +16,43 @@ export type TerminalSnapshot = {
   bracketedPaste: boolean;
   alternateScreen: boolean;
   applicationKeypad: boolean;
+  /**
+   * The mouse-reporting DEC private modes the attachment announced on our side
+   * of tmux (1000/1002/1003 press/drag/motion, 1005/1006/1015 encodings). The
+   * client replays them into its own terminal so mouse-aware TUIs receive
+   * wheel, click and drag the way a local terminal would deliver them; an
+   * application that never asks for the mouse is never sent any.
+   */
+  mouseModes: number[];
 };
 
+/**
+ * The modes xterm.js implements for mouse reporting; anything else the
+ * attachment announces is left alone rather than guessed at.
+ */
+const MOUSE_REPORTING_MODES = new Set([1000, 1002, 1003, 1005, 1006, 1015]);
+
 /** tmux 3.2 has no bracketed-paste format variable. Its attachment still
- * announces this input mode; retain it even when the CSI crosses PTY chunks. */
+ * announces this input mode; retain it even when the CSI crosses PTY chunks.
+ * Mouse-reporting modes are retained the same way: tmux forwards them to this
+ * attachment because the pane application requested them, and the client
+ * cannot learn them from a rendered frame.
+ */
 export class TmuxInputModes {
   bracketedPaste = false;
+  readonly mouseModes = new Set<number>();
   private partial = "";
   feed(bytes: Buffer): void {
     const text = this.partial + bytes.toString("latin1");
     for (const match of text.matchAll(/\x1b\[\?([\d;]+)([hl])/g)) {
-      if (match[1]!.split(";").includes("2004")) this.bracketedPaste = match[2] === "h";
+      for (const raw of match[1]!.split(";")) {
+        const mode = Number(raw);
+        if (mode === 2004) this.bracketedPaste = match[2] === "h";
+        else if (MOUSE_REPORTING_MODES.has(mode)) {
+          if (match[2] === "h") this.mouseModes.add(mode);
+          else this.mouseModes.delete(mode);
+        }
+      }
     }
     this.partial = /\x1b(?:\[(?:\?[\d;]*)?)?$/.exec(text)?.[0] ?? "";
   }
@@ -65,5 +91,7 @@ export async function captureTerminal(socket: string, target: string): Promise<T
     bracketedPaste: false,
     applicationKeypad: metadata[6] === "1",
     alternateScreen: metadata[8] === "1",
+    // A capture cannot see input modes; the handle supplies the live ones.
+    mouseModes: [],
   };
 }
