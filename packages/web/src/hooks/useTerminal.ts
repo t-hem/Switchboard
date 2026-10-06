@@ -25,6 +25,18 @@ const ENTER_MIN_GAP_MS = 40;
 const ENTER_MAX_WAIT_MS = 250;
 const BACKOFF_START_MS = 500;
 const BACKOFF_MAX_MS = 30_000;
+/**
+ * Typing-stall diagnostics (2026-10): every keystroke stamps a clock when it
+ * leaves for the host, and the first frame back measures the gap — the latency
+ * the user actually feels, end to end. Spikes land in the browser console to
+ * compare against the host daemon's `[lag]` lines at the same moment.
+ *
+ * The upper bound is a heuristic, not a measurement: an agent that shows
+ * nothing for seconds after Enter is thinking, not stalling, and must not be
+ * reported as lag.
+ */
+const INPUT_LAG_WARN_MS = 300;
+const INPUT_LAG_MAX_MS = 2000;
 
 export type TerminalHandle = {
   state: ConnectionState;
@@ -98,9 +110,14 @@ export function useTerminal({
   // that the agent has actually read what it was sent.
   const outputWaitersRef = useRef<(() => void)[]>([]);
 
+  // Set when a keystroke leaves for the host, cleared by the first frame back.
+  // See INPUT_LAG_WARN_MS above for how this becomes a diagnostic.
+  const lastInputAtRef = useRef(0);
+
   const send = useCallback((data: string) => {
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
+      lastInputAtRef.current = performance.now();
       socket.send(JSON.stringify({ type: "input", data }));
     }
   }, []);
@@ -346,9 +363,24 @@ export function useTerminal({
     const inputSub = term.onData((data) => {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
+        lastInputAtRef.current = performance.now();
         socket.send(JSON.stringify({ type: "input", data }));
       }
     });
+
+    /**
+     * First frame back after a keystroke closes the loop: one console line per
+     * spike, never one per frame (the timestamp is consumed on the first).
+     */
+    const noteInputLag = (): void => {
+      const sentAt = lastInputAtRef.current;
+      if (sentAt === 0) return;
+      lastInputAtRef.current = 0;
+      const ms = performance.now() - sentAt;
+      if (ms >= INPUT_LAG_WARN_MS && ms <= INPUT_LAG_MAX_MS) {
+        console.log(`[switchboard] ${Math.round(ms)}ms from keystroke to screen — compare the host daemon's [lag] lines at the same moment`);
+      }
+    };
 
     const connect = (): void => {
       if (closedRef.current) return;
@@ -386,6 +418,7 @@ export function useTerminal({
             if (msg.type === "snapshot") {
               if (typeof msg.history === "string") snapshotHistory = msg.history;
               snapshots.receive({ ...msg, history: snapshotHistory } as TerminalSnapshot);
+              noteInputLag();
               const waiters = outputWaitersRef.current.splice(0);
               for (const waiter of waiters) waiter();
             } else if (msg.type === "exit") {
@@ -405,6 +438,7 @@ export function useTerminal({
           return;
         }
         term.write(new Uint8Array(event.data));
+        noteInputLag();
         // Output means the agent has read what it was last sent — which is what a
         // pending Enter is waiting for.
         const waiters = outputWaitersRef.current;

@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import { configDir, loadHostConfig } from "./config.js";
+import { startEventLoopLagMonitor } from "./latency.js";
 import { SessionLedger } from "./ledger.js";
 import { ClaimRegistry } from "./claim.js";
 import { AgentRegistry } from "./registry.js";
@@ -28,6 +29,10 @@ async function main(): Promise<void> {
   });
 
   await app.listen({ port: config.port, host: "0.0.0.0" });
+
+  // Typing-stall diagnostics: one stdout line whenever the main thread is
+  // blocked long enough for every client to feel it. See src/latency.ts.
+  startEventLoopLagMonitor();
 
   console.log(`switchboard-host ${pkg.version} — ${config.hostLabel} (${process.platform})`);
   console.log(`listening on http://0.0.0.0:${config.port}`);

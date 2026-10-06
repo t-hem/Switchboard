@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { parseAgentsPayload } from "./agentsvalidate.js";
 import { bearerToken, tokenMatches } from "./auth.js";
 import { ClaimRegistry, type EvictableSocket } from "./claim.js";
+import { logSlowAsync } from "./latency.js";
 import type { SessionLedger } from "./ledger.js";
 import type { AgentRegistry } from "./registry.js";
 import { SessionError, type SessionManager } from "./sessions.js";
@@ -27,6 +28,20 @@ const DROP_NOTICE = Buffer.from(
   "utf8",
 );
 const RESUME_NOTICE = Buffer.from("\r\n\u001b[33m[switchboard] output resumed\u001b[0m\r\n", "utf8");
+
+// --- latency diagnostics (src/latency.ts has the story) --------------------
+/**
+ * A snapshot capture spawns a tmux subprocess per repaint, and typing makes one
+ * per keystroke batch. This is the ceiling for echo latency on a healthy host;
+ * beyond it the daemon names itself as the cause (as opposed to the link).
+ */
+const SNAPSHOT_SLOW_MS = 150;
+/**
+ * A snapshot frame this big already queued on the socket means the client is
+ * draining slower than the workload renders — the network, not the host. Well
+ * under the 8MB drop ceiling so it distinguishes the two before output is lost.
+ */
+const SLOW_LINK_BYTES = 1024 * 1024;
 
 export type ServerDeps = {
   hostConfig: HostConfig;
@@ -160,6 +175,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       deps.claims.register(clientId, clientLabel, evictable);
 
       let dropping = false;
+      let linkLagged = false;
       let detach: (() => void) | null = null;
       let snapshotMode = false;
       let snapshotTimer: NodeJS.Timeout | undefined;
@@ -187,9 +203,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         capturing = true;
         dirty = false;
         try {
+          const startedAt = performance.now();
           const frame = await deps.sessions.snapshot(id);
           if (disposed || socket.readyState !== socket.OPEN) return;
           const data = JSON.stringify(frame);
+          logSlowAsync(
+            `snapshot for ${id}`,
+            startedAt,
+            SNAPSHOT_SLOW_MS,
+            `${data.length}-byte frame, ${socket.bufferedAmount} bytes already queued on the link`,
+          );
           if (data !== previousSnapshot) {
             // Most token updates only change the screen. Do not resend thousands
             // of identical history lines on every keystroke or cursor update.
@@ -201,6 +224,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (pendingExit !== undefined) {
             socket.send(JSON.stringify({ type: "exit", exitCode: pendingExit }));
             pendingExit = undefined;
+          }
+          // Backlog between the drop ceiling and a drained socket is the link
+          // falling behind — report the transition, not every frame of it.
+          if (socket.bufferedAmount > SLOW_LINK_BYTES) {
+            if (!linkLagged) {
+              linkLagged = true;
+              console.log(`[ws ${id}] client link is the bottleneck: ${socket.bufferedAmount} bytes queued and growing`);
+            }
+          } else {
+            linkLagged = false;
           }
         } catch {
           // Never silently strand the browser on stale output. Reconnect retries

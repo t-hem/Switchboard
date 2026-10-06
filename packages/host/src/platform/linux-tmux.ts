@@ -11,7 +11,15 @@ import { TmuxQueryFilter } from "./tmux-queries.js";
 import { captureTerminal, TmuxInputModes } from "./tmux-display.js";
 
 type Pane = { target: string; pid: number; dead: boolean; exitCode: number | null; metadata: string; title: string };
-const command = (file: string, args: string[]): string => {
+/**
+ * Sync subprocesses run on the main thread — inside the 1s reconciliation poll,
+ * mostly — so one this slow is a fleet-wide typing stall. The label is the tmux
+ * subcommand or binary name, never the arguments: argv can carry agent env.
+ */
+const SLOW_SYNC_MS = 100;
+const SLOW_POLL_MS = 250;
+const command = (file: string, args: string[], label?: string): string => {
+  const startedAt = performance.now();
   try {
     return execFileSync(file, args, {
       encoding: "utf8", timeout: 5000, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
@@ -20,6 +28,11 @@ const command = (file: string, args: string[]): string => {
     // execFileSync's default message includes argv, which may contain the agent env.
     const failure = err as { status?: number; code?: string };
     throw new Error(`${file} operation failed (${failure.code ?? failure.status ?? "unknown"}); inspect owner/service status`);
+  } finally {
+    const ms = performance.now() - startedAt;
+    if (ms >= SLOW_SYNC_MS) {
+      console.log(`[lag] sync ${label ?? path.basename(file)} blocked the event loop for ${Math.round(ms)}ms`);
+    }
   }
 };
 const errorText = (err: unknown): string => err instanceof Error ? err.message : String(err);
@@ -50,12 +63,25 @@ export class LinuxTmuxBackend implements SessionBackend {
     this.#registry = new RecoveryRegistry(dir, posixOps);
     for (const entry of this.#registry.list()) this.#entries.set(entry.session.id, entry);
     if (options.reconcile !== false) {
-      this.#timer = setInterval(() => this.#poll(), 1000);
+      // The poll is synchronous by design (recovery must observe, not race).
+      // Timing it separately from its individual tmux/systemctl calls catches
+      // the case where many commands each pass the threshold but add up.
+      this.#timer = setInterval(() => {
+        const startedAt = performance.now();
+        try {
+          this.#poll();
+        } finally {
+          const ms = performance.now() - startedAt;
+          if (ms >= SLOW_POLL_MS) {
+            console.log(`[lag] reconciliation poll took ${Math.round(ms)}ms (${this.#entries.size} sessions) — input waits behind it`);
+          }
+        }
+      }, 1000);
       this.#timer.unref();
     }
   }
 
-  #tmux(...args: string[]): string { return command("/usr/bin/tmux", ["-S", this.#config.socketPath, "-N", ...args]); }
+  #tmux(...args: string[]): string { return command("/usr/bin/tmux", ["-S", this.#config.socketPath, "-N", ...args], args[0]); }
   #owner(): void {
     const stat = fs.statSync(this.#config.socketPath);
     if (!stat.isSocket() || stat.uid !== process.getuid!() || (stat.mode & 0o077) !== 0) {
