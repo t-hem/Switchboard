@@ -85,6 +85,10 @@ export class TerminalSnapshots {
       this.paintedMouseModes = [];
     }
   }
+  /** The mouse-reporting modes most recently replayed into the terminal. */
+  get mouseModes(): number[] {
+    return this.paintedMouseModes;
+  }
   dispose(): void { this.disposed = true; this.pending = null; }
 
   private paint(): void {

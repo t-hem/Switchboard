@@ -305,6 +305,59 @@ export function useTerminal({
     const scrollSub = term.onScroll(() => { snapshots.scrolled(); syncAtBottom(); });
     const renderSub = term.onRender(() => { snapshots.scrolled(); syncAtBottom(); });
 
+    /**
+     * A touch drag is the phone's wheel.
+     *
+     * When an application has the mouse and the terminal is a full-screen TUI,
+     * there is nothing client-side to scroll — so hand the drag to the
+     * application as wheel notches, one per row travelled, and let it scroll
+     * its own transcript. Finger up means "toward the bottom", exactly as a
+     * wheel notch down does on a desktop, and the report carries the finger's
+     * position because that is how wheel-aware TUIs pick which region scrolls.
+     *
+     * SGR encoding only: that is the encoding the session negotiated, and
+     * guessing a legacy one risks writing garbage into a program that cannot
+     * parse it. Sessions without mouse reporting are untouched — the native
+     * scroll below keeps owning the drag for them.
+     */
+    let dragScroll: { y: number; accum: number } | null = null;
+    const dragToWheel = (): boolean =>
+      term.buffer.active.type === "alternate" && snapshots.mouseModes.includes(1006);
+    const onDragStart = (event: TouchEvent): void => {
+      if (event.touches.length > 1 || !dragToWheel()) return;
+      dragScroll = { y: event.touches[0]!.clientY, accum: 0 };
+    };
+    const onDragMove = (event: TouchEvent): void => {
+      const state = dragScroll;
+      if (!state || event.touches.length > 1 || !dragToWheel()) {
+        dragScroll = null;
+        return;
+      }
+      const touch = event.touches[0]!;
+      const rowHeight = viewportElement!.clientHeight / term.rows;
+      if (rowHeight <= 0) return;
+      state.accum += (state.y - touch.clientY) / rowHeight;
+      state.y = touch.clientY;
+      const notches = Math.trunc(state.accum);
+      state.accum -= notches;
+      if (notches === 0) return;
+      // The browser must not also try to scroll: there is nothing scrollable,
+      // and the overscroll bounce would fight the app's repaint.
+      event.preventDefault();
+      const rect = viewportElement!.getBoundingClientRect();
+      const col = Math.min(term.cols, Math.max(1, 1 + Math.floor((touch.clientX - rect.left) / (rect.width / term.cols))));
+      const row = Math.min(term.rows, Math.max(1, 1 + Math.floor((touch.clientY - rect.top) / rowHeight)));
+      const button = notches > 0 ? 65 : 64;
+      let report = "";
+      for (let i = 0; i < Math.abs(notches); i++) report += `\x1b[<${button};${col};${row}M`;
+      send(report);
+    };
+    const onDragEnd = (): void => { dragScroll = null; };
+    viewportElement?.addEventListener("touchstart", onDragStart);
+    viewportElement?.addEventListener("touchmove", onDragMove, { passive: false });
+    viewportElement?.addEventListener("touchend", onDragEnd);
+    viewportElement?.addEventListener("touchcancel", onDragEnd);
+
     // The last size this client successfully measured. Kept because a fit can fail
     // (a container with no layout yet) at exactly the moment the size is needed.
     let lastSize: { cols: number; rows: number } | null = null;
@@ -518,6 +571,10 @@ export function useTerminal({
       observer.disconnect();
       viewportElement?.removeEventListener("touchstart", stopTouch);
       viewportElement?.removeEventListener("touchmove", stopTouch);
+      viewportElement?.removeEventListener("touchstart", onDragStart);
+      viewportElement?.removeEventListener("touchmove", onDragMove);
+      viewportElement?.removeEventListener("touchend", onDragEnd);
+      viewportElement?.removeEventListener("touchcancel", onDragEnd);
       setViewport(null);
       scrollSub.dispose();
       renderSub.dispose();
