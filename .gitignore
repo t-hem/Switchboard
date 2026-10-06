@@ -11,3 +11,7 @@ openworker-main.zip
 
 # Operator defect screenshots, referenced from known_defects.md
 Vibe_Scrollbar_Issue.png
+
+# Operator-local agent notes; never synced through the repo
+CLAUDE.md
+AGENTS.md
