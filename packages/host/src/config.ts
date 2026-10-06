@@ -30,6 +30,7 @@ function defaultAgents(): AgentsConfig {
       codex: { cmd: "codex", args: [] },
       pi: { cmd: "pi", args: [], platform: { win32: { cmd: "pi.cmd" } } },
       gemini: { cmd: "gemini", args: [], install: "npm i -g @google/gemini-cli" },
+      vibe: { cmd: "vibe", args: [], install: "uv tool install mistral-vibe" },
     },
   };
 }
