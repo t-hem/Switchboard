@@ -200,6 +200,33 @@ export function useTerminal({
     fitRef.current = fit;
 
     /**
+     * The wheel must never fabricate keystrokes for a full-screen TUI.
+     *
+     * xterm turns wheel notches into Up/Down arrow input whenever the active
+     * buffer has no scrollback — its default assumption being that alt-screen
+     * programs (vim) scroll with arrows. The agents this client hosts are
+     * TUIs whose composers give Up/Down a different meaning: recall of
+     * previously sent prompts. Scrolling the session then silently walks the
+     * composer through history — input the user never typed (found
+     * 2026-10-06, after the agent CLIs moved their TUIs to the alternate
+     * screen, which is also when snapshot repaints made the buffer scrollless).
+     *
+     * An alt-screen session genuinely has no client-side history to scroll: the
+     * transcript lives inside the app, which keeps its own scroll keys (vibe:
+     * Shift+Up/Down). So the honest wheel behavior is nothing. The check is
+     * narrowed to the exact condition xterm would use, so native scrolling of a
+     * normal buffer — and app-handled wheel on binary-passthrough hosts, where
+     * the app enabled mouse reporting and `enable-mouse-events` is xterm's own
+     * marker for it — keep working untouched.
+     */
+    term.attachCustomWheelEventHandler(() => {
+      if (term.buffer.active.type === "alternate" && !term.element?.classList.contains("enable-mouse-events")) {
+        return false;
+      }
+      return true;
+    });
+
+    /**
      * Clipboard keys, and one key that must never reach the pty.
      *
      * xterm sends every Ctrl chord straight through as a control byte, which is
