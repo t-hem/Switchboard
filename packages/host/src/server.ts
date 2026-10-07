@@ -183,6 +183,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       let dirty = false;
       let previousSnapshot = "";
       let previousHistory: string | undefined;
+      // The clipboard the frame sequence number this socket last forwarded.
+      // The latest copy rides on every frame; the text is stripped from the
+      // wire once a socket has seen its sequence, so one big copy is not
+      // re-sent with every keystroke frame that follows it.
+      let previousClipboardSeq: number | undefined;
       let disposed = false;
       let pendingExit: number | null | undefined;
       let interactiveUntil = 0;
@@ -206,7 +211,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           const startedAt = performance.now();
           const frame = await deps.sessions.snapshot(id);
           if (disposed || socket.readyState !== socket.OPEN) return;
-          const data = JSON.stringify(frame);
+          const clipboard = frame?.clipboard;
+          const outbound = clipboard && clipboard.seq !== previousClipboardSeq ? frame : { ...frame, clipboard: undefined };
+          if (clipboard && clipboard.seq !== previousClipboardSeq) previousClipboardSeq = clipboard.seq;
+          const data = JSON.stringify(outbound);
           logSlowAsync(
             `snapshot for ${id}`,
             startedAt,
@@ -216,9 +224,9 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (data !== previousSnapshot) {
             // Most token updates only change the screen. Do not resend thousands
             // of identical history lines on every keystroke or cursor update.
-            socket.send(frame && frame.history === previousHistory
-              ? JSON.stringify({ ...frame, history: undefined }) : data);
-            previousHistory = frame?.history;
+            socket.send(outbound && outbound.history === previousHistory
+              ? JSON.stringify({ ...outbound, history: undefined }) : data);
+            previousHistory = outbound?.history;
             previousSnapshot = data;
           }
           if (pendingExit !== undefined) {

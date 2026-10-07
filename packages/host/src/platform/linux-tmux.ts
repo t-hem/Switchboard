@@ -386,6 +386,7 @@ class TmuxHandle implements SessionHandle {
     const frame = await captureTerminal(this.socket, this.entry.target);
     frame.bracketedPaste = this.#inputModes.bracketedPaste;
     frame.mouseModes = [...this.#inputModes.mouseModes];
+    frame.clipboard = this.#inputModes.clipboard() ?? undefined;
     return frame;
   }
   detach(): void { const child = this.#child; this.#child = null; child?.kill("SIGTERM"); }

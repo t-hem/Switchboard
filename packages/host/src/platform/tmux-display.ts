@@ -19,11 +19,15 @@ export type TerminalSnapshot = {
   /**
    * The mouse-reporting DEC private modes the attachment announced on our side
    * of tmux (1000/1002/1003 press/drag/motion, 1005/1006/1015 encodings). The
-   * client replays them into its own terminal so mouse-aware TUIs receive
-   * wheel, click and drag the way a local terminal would deliver them; an
-   * application that never asks for the mouse is never sent any.
+   * client synthesizes its own SGR wheel and click reports from these — it
+   * never replays them into its terminal, which would disable selection.
    */
   mouseModes: number[];
+  /** The session's most recent copy, with a sequence number that advances per
+   * OSC 52. Forwarded on frames so a copy made in the session (tmux
+   * copy-mode, an application's yank) can reach the clipboard of the machine
+   * viewing it. Null until the first copy. */
+  clipboard?: { seq: number; text: string };
 };
 
 /**
@@ -32,15 +36,24 @@ export type TerminalSnapshot = {
  */
 const MOUSE_REPORTING_MODES = new Set([1000, 1002, 1003, 1005, 1006, 1015]);
 
+/** OSC 52 — "manipulate selection data". tmux emits it when it (or a pane
+ * application) copies and `set-clipboard` allows announcing the copy outward;
+ * the payload is base64 text and Pc names the selection (tmux sends the empty
+ * name). The payload class is base64 only, which excludes the query (`?`) and
+ * empty (clear) forms on its own — neither carries text, and neither is
+ * forwarded. */
+const OSC_52 = /\x1b\]52;([^;\x07\x1b]*);([A-Za-z0-9+/=]+)(?:\x07|\x1b\\)/g;
+
 /** tmux 3.2 has no bracketed-paste format variable. Its attachment still
  * announces this input mode; retain it even when the CSI crosses PTY chunks.
- * Mouse-reporting modes are retained the same way: tmux forwards them to this
- * attachment because the pane application requested them, and the client
- * cannot learn them from a rendered frame.
+ * Mouse-reporting modes and clipboard copies are retained the same way: tmux
+ * forwards them to this attachment because the pane application requested
+ * them, and the client cannot learn them from a rendered frame.
  */
 export class TmuxInputModes {
   bracketedPaste = false;
   readonly mouseModes = new Set<number>();
+  #clipboard: { seq: number; text: string } | null = null;
   private partial = "";
   feed(bytes: Buffer): void {
     const text = this.partial + bytes.toString("latin1");
@@ -54,7 +67,21 @@ export class TmuxInputModes {
         }
       }
     }
-    this.partial = /\x1b(?:\[(?:\?[\d;]*)?)?$/.exec(text)?.[0] ?? "";
+    for (const match of text.matchAll(OSC_52)) {
+      const decoded = Buffer.from(match[2]!, "base64").toString("utf8");
+      this.#clipboard = { seq: (this.#clipboard?.seq ?? 0) + 1, text: decoded };
+    }
+    // Retain a trailing partial sequence of either kind: an unfinished CSI
+    // (`ESC [ ? 2004`) or an unfinished OSC (`ESC ] 52 ; c ; QUJD`, whose
+    // terminator may also split, leaving a lone trailing `ESC`). An OSC tail
+    // is longer and starts earlier, so the longer tail wins when both match.
+    const csi = /\x1b(?:\[(?:\?[\d;]*)?)?$/.exec(text)?.[0] ?? "";
+    const osc = /\x1b\][^\x07\x1b]*(?:\x1b)?$/.exec(text)?.[0] ?? "";
+    this.partial = csi.length >= osc.length ? csi : osc;
+  }
+  /** The latest copy, or null before the session ever copied. */
+  clipboard(): { seq: number; text: string } | null {
+    return this.#clipboard;
   }
 }
 

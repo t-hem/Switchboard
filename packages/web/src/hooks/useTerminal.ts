@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { probeStreamAccess, streamUrl } from "../api/client.ts";
 import type { HostEntry } from "../types.ts";
-import { TerminalSnapshots, type TerminalSnapshot } from "./terminalSnapshots.ts";
+import { sgrWheelReports, TerminalSnapshots, wheelNotches, type TerminalSnapshot } from "./terminalSnapshots.ts";
 
 export type ConnectionState =
   | "connecting"
@@ -200,33 +200,6 @@ export function useTerminal({
     fitRef.current = fit;
 
     /**
-     * The wheel must never fabricate keystrokes for a full-screen TUI.
-     *
-     * xterm turns wheel notches into Up/Down arrow input whenever the active
-     * buffer has no scrollback — its default assumption being that alt-screen
-     * programs (vim) scroll with arrows. The agents this client hosts are
-     * TUIs whose composers give Up/Down a different meaning: recall of
-     * previously sent prompts. Scrolling the session then silently walks the
-     * composer through history — input the user never typed (found
-     * 2026-10-06, after the agent CLIs moved their TUIs to the alternate
-     * screen, which is also when snapshot repaints made the buffer scrollless).
-     *
-     * An alt-screen session genuinely has no client-side history to scroll: the
-     * transcript lives inside the app, which keeps its own scroll keys (vibe:
-     * Shift+Up/Down). So the honest wheel behavior is nothing. The check is
-     * narrowed to the exact condition xterm would use, so native scrolling of a
-     * normal buffer — and app-handled wheel on binary-passthrough hosts, where
-     * the app enabled mouse reporting and `enable-mouse-events` is xterm's own
-     * marker for it — keep working untouched.
-     */
-    term.attachCustomWheelEventHandler(() => {
-      if (term.buffer.active.type === "alternate" && !term.element?.classList.contains("enable-mouse-events")) {
-        return false;
-      }
-      return true;
-    });
-
-    /**
      * Clipboard keys, and one key that must never reach the pty.
      *
      * xterm sends every Ctrl chord straight through as a control byte, which is
@@ -347,16 +320,102 @@ export function useTerminal({
       const rect = viewportElement!.getBoundingClientRect();
       const col = Math.min(term.cols, Math.max(1, 1 + Math.floor((touch.clientX - rect.left) / (rect.width / term.cols))));
       const row = Math.min(term.rows, Math.max(1, 1 + Math.floor((touch.clientY - rect.top) / rowHeight)));
-      const button = notches > 0 ? 65 : 64;
-      let report = "";
-      for (let i = 0; i < Math.abs(notches); i++) report += `\x1b[<${button};${col};${row}M`;
-      send(report);
+      send(sgrWheelReports(notches, col, row));
     };
     const onDragEnd = (): void => { dragScroll = null; };
     viewportElement?.addEventListener("touchstart", onDragStart);
     viewportElement?.addEventListener("touchmove", onDragMove, { passive: false });
     viewportElement?.addEventListener("touchend", onDragEnd);
     viewportElement?.addEventListener("touchcancel", onDragEnd);
+
+    /**
+     * The wheel, for a session whose application asked for the mouse.
+     *
+     * xterm turns wheel notches into Up/Down arrow input whenever the active
+     * buffer has no scrollback — its default assumption being that alt-screen
+     * programs (vim) scroll with arrows. The agents this client hosts are
+     * TUIs whose composers give Up/Down a different meaning: recall of
+     * previously sent prompts. Scrolling the session then silently walks the
+     * composer through history — input the user never typed (found
+     * 2026-10-06, after the agent CLIs moved their TUIs to the alternate
+     * screen, which is also when snapshot repaints made the buffer scrollless).
+     *
+     * A mouse-aware application gets its wheel as synthetic SGR notches —
+     * the same reports a local terminal would send — so its transcript
+     * scrolls. Handled here, by synthesis, rather than by replaying the app's
+     * mouse DECSETs into the terminal: entering mouse reporting is what
+     * switches xterm's selection service off entirely, and selection is the
+     * only path a copy has to the viewing machine's clipboard (found
+     * 2026-10-07 — replayed modes took drag-select, and with it copy, away).
+     *
+     * For everything else the wheel keeps its old behavior: nothing on the
+     * alternate screen (there is no client-side history to scroll there),
+     * native scrolling of a normal buffer, and `enable-mouse-events` keeps
+     * marking the binary-passthrough hosts where the app really did enable
+     * mouse reporting itself and xterm's own wheel path is live.
+     */
+    term.attachCustomWheelEventHandler((event: WheelEvent) => {
+      if (!snapshots.mouseModes.includes(1006)) {
+        if (term.buffer.active.type === "alternate" && !term.element?.classList.contains("enable-mouse-events")) {
+          return false;
+        }
+        return true;
+      }
+      // The browser must not also try to scroll: the application owns the
+      // scrolling now, and the fallbacks would fabricate arrow keys into the
+      // composer or fight the app's repaint.
+      event.preventDefault();
+      const rect = viewportElement!.getBoundingClientRect();
+      const rowHeight = viewportElement!.clientHeight / term.rows;
+      const notches = wheelNotches(event.deltaY, rowHeight);
+      if (notches !== 0) {
+        const col = Math.min(term.cols, Math.max(1, 1 + Math.floor((event.clientX - rect.left) / (rect.width / term.cols))));
+        const row = Math.min(term.rows, Math.max(1, 1 + Math.floor((event.clientY - rect.top) / rowHeight)));
+        send(sgrWheelReports(notches, col, row));
+      }
+      return false;
+    });
+
+    /**
+     * A click, for a session whose application asked for the mouse.
+     *
+     * Mouse-aware TUIs read clicks — cursor placement, buttons, transcript
+     * focus — the same way they read the wheel. The click is forwarded only
+     * on release, and only when the press did not become a selection: a drag
+     * is the user selecting text to copy, which must stay a browser selection
+     * (see the wheel handler above for why that matters). xterm owns the
+     * press either way; this only decides what the application hears.
+     *
+     * Listened for on the terminal root, not the viewport: on a desktop the
+     * clicks land on `.xterm-screen`, which is a *sibling* of the viewport —
+     * the pointer-events rule that routes touch to the viewport is
+     * `@media (pointer: coarse)` only. The root receives both, plus nothing
+     * else: the custom scrollbar renders outside the terminal element.
+     *
+     * Left button only, SGR encoding only — same boundary as the bridges
+     * above. A click that lands outside the grid is clamped onto it, exactly
+     * as the touch bridge clamps its reports.
+     */
+    let clickPress: { x: number; y: number } | null = null;
+    const onMouseDown = (event: MouseEvent): void => {
+      if (event.button !== 0 || !snapshots.mouseModes.includes(1006)) return;
+      clickPress = { x: event.clientX, y: event.clientY };
+    };
+    const onMouseUp = (event: MouseEvent): void => {
+      const press = clickPress;
+      clickPress = null;
+      if (event.button !== 0 || !press || !snapshots.mouseModes.includes(1006)) return;
+      if (term.hasSelection()) return;
+      const rect = viewportElement!.getBoundingClientRect();
+      const rowHeight = viewportElement!.clientHeight / term.rows;
+      // Movement beyond half a row was a drag; the selection owns it.
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > rowHeight / 2) return;
+      const col = Math.min(term.cols, Math.max(1, 1 + Math.floor((event.clientX - rect.left) / (rect.width / term.cols))));
+      const row = Math.min(term.rows, Math.max(1, 1 + Math.floor((event.clientY - rect.top) / rowHeight)));
+      send(`\x1b[<0;${col};${row}M\x1b[<0;${col};${row}m`);
+    };
+    term.element!.addEventListener("mousedown", onMouseDown);
+    term.element!.addEventListener("mouseup", onMouseUp);
 
     // The last size this client successfully measured. Kept because a fit can fail
     // (a container with no layout yet) at exactly the moment the size is needed.
@@ -462,6 +521,27 @@ export function useTerminal({
       }
     };
 
+    /**
+     * The last clipboard sequence this terminal mount has seen, or null before
+     * the first frame. The first frame only adopts the sequence — a copy made
+     * before this page connected must not overwrite the clipboard of the
+     * machine viewing it. It survives reconnects, which resend the session's
+     * latest clipboard as part of their first frame.
+     */
+    let clipboardSeq: number | null = null;
+    const applySessionClipboard = (clip: { seq: number; text: string } | undefined): void => {
+      if (!clip || typeof clip.seq !== "number" || typeof clip.text !== "string") return;
+      if (clipboardSeq !== null && clip.seq > clipboardSeq) {
+        // The session copied something new (tmux copy-mode, an app's yank —
+        // OSC 52 forwarded by the host). A copy the user just made server-side
+        // is exactly what they want on the machine they are reading from.
+        void navigator.clipboard?.writeText(clip.text).catch(() => {
+          /* no focus or permission; the copy still lives in the session */
+        });
+      }
+      clipboardSeq = clip.seq;
+    };
+
     const connect = (): void => {
       if (closedRef.current) return;
       let snapshotHistory = "";
@@ -497,6 +577,7 @@ export function useTerminal({
             const msg = JSON.parse(event.data) as Partial<Omit<TerminalSnapshot, "type">> & { type?: string; exitCode?: number; reason?: string };
             if (msg.type === "snapshot") {
               if (typeof msg.history === "string") snapshotHistory = msg.history;
+              applySessionClipboard(msg.clipboard);
               snapshots.receive({ ...msg, history: snapshotHistory } as TerminalSnapshot);
               noteInputLag();
               const waiters = outputWaitersRef.current.splice(0);
@@ -575,6 +656,8 @@ export function useTerminal({
       viewportElement?.removeEventListener("touchmove", onDragMove);
       viewportElement?.removeEventListener("touchend", onDragEnd);
       viewportElement?.removeEventListener("touchcancel", onDragEnd);
+      term.element?.removeEventListener("mousedown", onMouseDown);
+      term.element?.removeEventListener("mouseup", onMouseUp);
       setViewport(null);
       scrollSub.dispose();
       renderSub.dispose();

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import xterm from "@xterm/headless";
 import { TmuxInputModes } from "../src/platform/tmux-display.ts";
-import { mouseModeTransitions, TerminalSnapshots, type TerminalSnapshot } from "../../web/src/hooks/terminalSnapshots.ts";
+import { sgrWheelReports, TerminalSnapshots, wheelNotches, type TerminalSnapshot } from "../../web/src/hooks/terminalSnapshots.ts";
 
 test("attachment paste mode survives every possible chunk boundary", () => {
   const sequence = "text\x1b[?1;2004h";
@@ -78,14 +78,44 @@ test("attachment mouse-reporting modes survive every possible chunk boundary", (
   }
 });
 
-test("mouse mode transitions replay only what changed", () => {
-  assert.equal(mouseModeTransitions([], [1000, 1006]), "\x1b[?1000h\x1b[?1006h");
-  assert.equal(mouseModeTransitions([1000, 1006], [1006, 1003]), "\x1b[?1003h\x1b[?1000l");
-  assert.equal(mouseModeTransitions([1006], [1006]), "");
-  assert.equal(mouseModeTransitions([1000], []), "\x1b[?1000l");
+test("attachment OSC 52 copies survive every possible chunk boundary", () => {
+  const sequence = "text\x1b]52;;SGVsbG8sIHdvcmxk\x07\x1b[?1000h";
+  for (let split = 0; split <= sequence.length; split++) {
+    const modes = new TmuxInputModes();
+    modes.feed(Buffer.from(sequence.slice(0, split)));
+    modes.feed(Buffer.from(sequence.slice(split)));
+    assert.deepEqual(modes.clipboard(), { seq: 1, text: "Hello, world" }, `split at ${split}`);
+    assert.ok([...modes.mouseModes].includes(1000), `modes tracked at ${split}`);
+  }
 });
 
-test("snapshot renderer replays mouse modes into the terminal and drops them on reset", async () => {
+test("attachment OSC 52 also parses the ST terminator, named selections and sequences", () => {
+  const modes = new TmuxInputModes();
+  modes.feed(Buffer.from("\x1b]52;c;Zmlyc3Q\x1b\\\x1b]52;p;c2Vjb25k\x07"));
+  assert.deepEqual(modes.clipboard(), { seq: 2, text: "second" });
+  // A query (payload `?`) is not a copy, and neither is an unterminated escape.
+  modes.feed(Buffer.from("\x1b]52;c;?\x07\x1b]52;c;\x07garbage"));
+  assert.deepEqual(modes.clipboard(), { seq: 2, text: "second" });
+  // A base64 payload that decodes to multi-byte UTF-8 survives the round trip.
+  modes.feed(Buffer.from("\x1b]52;;w6nDqcOpIMO2w7Y=\x07"));
+  assert.deepEqual(modes.clipboard(), { seq: 3, text: "ééé öö" });
+  assert.equal(new TmuxInputModes().clipboard(), null);
+});
+
+test("wheel and click bridges emit byte-exact SGR reports", () => {
+  // Three rows per notch, never zero for a real scroll, sign is direction.
+  assert.equal(wheelNotches(3 * 13, 13), 1);
+  assert.equal(wheelNotches(2 * 3 * 13, 13), 2);
+  assert.equal(wheelNotches(-13, 13), -1);
+  assert.equal(wheelNotches(6, 13), 1);
+  assert.equal(wheelNotches(0, 13), 0);
+  assert.equal(wheelNotches(100, 0), 0);
+  assert.equal(sgrWheelReports(2, 30, 12), "\x1b[<65;30;12M\x1b[<65;30;12M");
+  assert.equal(sgrWheelReports(-1, 5, 1), "\x1b[<64;5;1M");
+  assert.equal(sgrWheelReports(0, 5, 1), "");
+});
+
+test("snapshot renderer keeps mouse modes out of the terminal but exposes them", async () => {
   const term = new xterm.Terminal({cols:40,rows:5,scrollback:50000,allowProposedApi:true});
   Object.assign(term, {hasSelection:() => false, clearSelection:() => {}});
   const writes: string[] = [];
@@ -98,10 +128,12 @@ test("snapshot renderer replays mouse modes into the terminal and drops them on 
     bracketedPaste:false,applicationKeypad:false,alternateScreen:false,mouseModes:[1003,1006]};
   try {
     await new Promise<void>(resolve => {painted=resolve; renderer.receive(frame);});
-    assert.ok(writes.some(d => d.includes("\x1b[?1003h\x1b[?1006h")), "modes are replayed on first paint");
-    await new Promise<void>(resolve => {painted=resolve; renderer.receive({...frame,screen:"y"});});
-    assert.ok(!writes.slice(-1)[0]!.includes("\x1b[?100"), "unchanged modes are not re-sent");
+    // Entering mouse reporting is what disables xterm's selection service —
+    // the regression that took drag-to-copy away — so modes are never written.
+    assert.ok(!writes.some(d => d.includes("\x1b[?100")), "mouse modes must never be replayed");
+    assert.deepEqual(renderer.mouseModes, [1003, 1006]);
     renderer.reset();
-    assert.ok(writes.slice(-1)[0]!.includes("\x1b[?1003l\x1b[?1006l"), "reset drops the modes");
+    assert.deepEqual(renderer.mouseModes, []);
+    assert.ok(!writes.slice(-1)[0]!.includes("\x1b[?100"), "reset writes no mode sequences");
   } finally {renderer.dispose();term.dispose();}
 });
