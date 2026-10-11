@@ -306,6 +306,17 @@ export function useTerminal({
         dragScroll = null;
         return;
       }
+      // Cancel the gesture from the very first move, before a full row has been
+      // travelled. iOS Safari decides on that first touchmove whether a touch
+      // is a scroll; a move it sees go uncancelled makes it claim the gesture,
+      // send touchcancel and stop delivering moves entirely — so the drag died
+      // before its first notch, and with no client-side scroll range in the
+      // alternate buffer nothing scrolled at all (found 2026-10-11, handset
+      // report after the drag bridge shipped; the bridge had only ever been
+      // exercised in desktop Chromium, which delivers every move regardless).
+      // There is also nothing scrollable here to leave to the browser: the
+      // overscroll bounce would only fight the app's repaint.
+      event.preventDefault();
       const touch = event.touches[0]!;
       const rowHeight = viewportElement!.clientHeight / term.rows;
       if (rowHeight <= 0) return;
@@ -314,9 +325,6 @@ export function useTerminal({
       const notches = Math.trunc(state.accum);
       state.accum -= notches;
       if (notches === 0) return;
-      // The browser must not also try to scroll: there is nothing scrollable,
-      // and the overscroll bounce would fight the app's repaint.
-      event.preventDefault();
       const rect = viewportElement!.getBoundingClientRect();
       const col = Math.min(term.cols, Math.max(1, 1 + Math.floor((touch.clientX - rect.left) / (rect.width / term.cols))));
       const row = Math.min(term.rows, Math.max(1, 1 + Math.floor((touch.clientY - rect.top) / rowHeight)));

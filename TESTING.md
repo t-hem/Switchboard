@@ -271,6 +271,19 @@ to focus the input bar when the terminal is tapped, not to repair raw typing.
 - [x] **Scrolling — fixed and confirmed on the handset, 2026-09-15.** The fling
       carries instead of stopping dead. Handing touch scrolling back to the browser
       works; the 1:1 drag is gone.
+- [ ] **Drag-scrolling a mouse-mode TUI — fixed 2026-10-11, unverified on the handset.**
+      The agent CLIs have since moved their TUIs to the alternate screen with SGR
+      mouse reporting on, so in an agent session a drag must arrive as synthesized
+      wheel notches — there is no client-side scroll range left to scroll natively.
+      The bridge shipped 2026-10-06 cancelling each touchmove only once a full row
+      had been travelled, and iOS Safari claims any touch whose first move it sees
+      go uncancelled: touchcancel, no further moves, no notch ever sent, and a drag
+      on an agent transcript did nothing at all. The first touchmove is now cancelled
+      from the start of the gesture. Pinned by `display.mjs` (the notch reports are
+      asserted from the pane's side of the pty); the handset confirm is dragging any
+      agent transcript and watching it scroll — by the app's own step per notch, and
+      *without* the native fling, which still belongs to scrollback sessions. If the
+      step feels too coarse, the notch rate in `useTerminal.ts` is the knob.
 - [ ] **↓ Latest.** Scroll up while output is streaming and confirm the button appears
       and returns you to the live view in one tap. Not separately reported on yet.
 - [ ] **The drag thumb.** Confirm it is visible whenever there is scrollback, that a

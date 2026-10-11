@@ -11,7 +11,7 @@ import { createServer } from 'vite';
 import { buildServer } from '../../host/src/server.ts';
 import { SessionManager } from '../../host/src/sessions.ts';
 import { ClaimRegistry } from '../../host/src/claim.ts';
-import { captureTerminal } from '../../host/src/platform/tmux-display.ts';
+import { captureTerminal, TmuxInputModes } from '../../host/src/platform/tmux-display.ts';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const dir = fs.mkdtempSync('/tmp/sw-display-accept-');
@@ -28,9 +28,14 @@ try {
   });
   const record = {id:'display',agent:'test',label:'Display',cwd:dir,pid:child.pid,status:'running',exitCode:null,
     cols:100,rows:30,createdAt:Date.now(),lastOutputAt:Date.now(),backend:'tmux'};
-  const handle = {pid:child.pid, onData:cb => child.onData(data => cb(Buffer.from(data))), onExit:() => {},
+  // The modes the pane announced, attached the way production's linux-tmux
+  // attaches them to each frame — the drag bridge is gated on them, so the
+  // harness must supply them or the mouse path is never exercised.
+  const inputModes = new TmuxInputModes();
+  const handle = {pid:child.pid, onData:cb => child.onData(data => { inputModes.feed(Buffer.from(data)); cb(Buffer.from(data)); }), onExit:() => {},
     write:data => child.write(data), resize:(cols,rows) => child.resize(cols,rows),
-    snapshot:() => captureTerminal(socket, 'display'), signal:() => {}, disconnect:() => {}};
+    snapshot:async () => ({...await captureTerminal(socket, 'display'), bracketedPaste: inputModes.bracketedPaste,
+      mouseModes: [...inputModes.mouseModes], clipboard: inputModes.clipboard() ?? undefined}), signal:() => {}, disconnect:() => {}};
   const config = {token:'display-test',hostLabel:'test',scrollbackBytes:262144};
   const registry = {list:() => [{name:'test',available:true}]};
   const sessions = new SessionManager(config, registry, {}, {
@@ -141,6 +146,48 @@ try {
   await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
   await page.mouse.down(); await page.mouse.move(box.x+box.width/2,box.y-120,{steps:10}); await page.mouse.up();
   assert.ok((await scroll()).top < beforeDrag, 'drag scrollbar moves history');
+
+  // The phone's drag bridge, end to end: a TUI on the alternate screen with
+  // SGR mouse reporting has no client-side scroll range, so a touch drag must
+  // arrive as synthesized SGR wheel notches. And the gesture has to be
+  // cancelled from the first touchmove — before a full row of travel — because
+  // iOS Safari claims any touch whose first move it sees go uncancelled and
+  // then delivers nothing further (found 2026-10-11, handset report; desktop
+  // Chromium delivers every move either way, which is why this passed before).
+  // Back to the live view first: the scrollbar drag above left the viewport
+  // scrolled up, and a scrolled-up reader is not repainted — the TUI frame
+  // would never reach the screen.
+  await page.click('[aria-label="Jump to latest output"]');
+  await pause(250);
+  child.write('tui\r');
+  await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('TUI READY'));
+  await pause(500);
+  // A synthetic drag, so the first move's cancellation can be read back —
+  // CDP-dispatched touches cannot report defaultPrevented. The first move is
+  // deliberately sub-row: it must already be cancelled, before any notch.
+  const dragTouches = moves => page.evaluate(moves => {
+    const viewport = document.querySelector('.xterm-viewport');
+    const fire = (type, y) => {
+      const t = new Touch({identifier:1, target:viewport, clientX:180, clientY:y, radiusX:2, radiusY:2, rotationAngle:0, force:1});
+      const e = new TouchEvent(type, {cancelable:true, touches:[t], targetTouches:[t], changedTouches:[t]});
+      viewport.dispatchEvent(e);
+      return e;
+    };
+    fire('touchstart', moves.fromY);
+    const first = fire('touchmove', moves.fromY + (moves.toY < moves.fromY ? -2 : 2));
+    const step = moves.toY < moves.fromY ? -6 : 6;
+    for (let y = moves.fromY + step; step < 0 ? y >= moves.toY : y <= moves.toY; y += step) fire('touchmove', y);
+    viewport.dispatchEvent(new TouchEvent('touchend', {cancelable:true, touches:[], targetTouches:[], changedTouches:[]}));
+    return first.defaultPrevented;
+  }, moves);
+  const firstCancelled = await dragTouches({fromY:400, toY:240});
+  assert.ok(firstCancelled, 'a drag in a mouse-mode TUI cancels its first touchmove (iOS delivers moves only then)');
+  await page.waitForFunction(() => /WHEEL (\d+) down/.test(document.querySelector('.xterm-rows')?.textContent ?? '') && Number(RegExp.$1) >= 5,
+    {timeout:5000, message:'drag up reaches the pane as wheel-down notches'});
+  await dragTouches({fromY:240, toY:400});
+  await page.waitForFunction(() => /WHEEL (\d+) up/.test(document.querySelector('.xterm-rows')?.textContent ?? '') && Number(RegExp.$1) >= 10,
+    {timeout:5000, message:'drag back down reaches the pane as wheel-up notches'});
+  console.log('PASS touch drag scrolls a mouse-mode TUI, first move cancelled');
   assert.deepEqual(errors, []);
   console.log('PASS touch scrolling, draggable scrollbar, no browser exceptions');
 } finally {
